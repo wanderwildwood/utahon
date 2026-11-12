@@ -6,6 +6,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -37,6 +38,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -136,6 +139,16 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
     val pace = SPEED_SECONDS[speed - 1]
     val state = remember(id) { LazyListState() }
 
+    // A pedal's first press must turn the page. Android gives the first key pressed on a touched
+    // screen to "leaving touch mode", and swallows it, unless something already has the focus: so
+    // the sheet's own view takes it when the song opens and again whenever a dialog over it closes.
+    // (The view only takes the focus when something in it can: the sheet's box is that thing.)
+    val focus = remember { FocusRequester() }
+    val covered = chord != null || listing || more
+    LaunchedEffect(id, covered) {
+        if (!covered) runCatching { focus.requestFocus() }
+    }
+
     DisposableEffect(state) {
         Hands.onTurn = { forward -> scope.launch { if (forward) state.stepOn() else state.stepBack() } }
         onDispose { Hands.onTurn = null }
@@ -216,7 +229,7 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
             }
         },
     ) { padding ->
-        BoxWithConstraints(Modifier.padding(padding).fillMaxSize()) {
+        BoxWithConstraints(Modifier.padding(padding).fillMaxSize().focusRequester(focus).focusable()) {
             val measurer = rememberTextMeasurer()
             val columns = with(LocalDensity.current) {
                 val one = measurer.measure("0", mono).size.width.coerceAtLeast(1)
