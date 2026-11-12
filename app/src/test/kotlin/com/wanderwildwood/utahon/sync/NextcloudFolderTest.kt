@@ -29,6 +29,7 @@ class NextcloudFolderTest {
     private val folders = mutableSetOf("/remote.php/dav/files/ada/")
     private val files = linkedMapOf<String, Stored>()
     private var next = 100
+    private var gzipMarks = true
     private fun tag() = "\"e${next++}\""
 
     private fun answer(code: Int, body: String = "", headers: Map<String, String> = emptyMap()): MockResponse {
@@ -78,7 +79,9 @@ class NextcloudFolderTest {
                     }
                 }
             }
-            "GET" -> files[path]?.let { answer(200, it.text, mapOf("ETag" to it.etag)) } ?: answer(404)
+            // As a server that compresses does: the etag sent with the file is marked, and is not
+            // letter for letter the one the listing gives.
+            "GET" -> files[path]?.let { answer(200, it.text, mapOf("ETag" to (if (gzipMarks) "W/" + it.etag.dropLast(1) + "-gzip\"" else it.etag))) } ?: answer(404)
             "MOVE" -> {
                 val to = URLDecoder.decode(URI(x.getHeader("Destination")).rawPath.replace("+", "%2B"), "UTF-8")
                 val f = files[path] ?: return answer(404)
@@ -167,6 +170,68 @@ class NextcloudFolderTest {
         assertEquals(setOf("A Song", "Ada Whitlock/In A Folder"), l.places)
         assertEquals(".pro", l.songs.getValue("8").ending)
         assertEquals("Ada Whitlock", l.songs.getValue("9").folder)
+    }
+
+    @Test fun anEtagReadWithTheFileIsTheListingsEtag() {
+        val f = folder()
+        f.list()
+        val made = f.create("", "Lantern Road", "one")
+        assertEquals(made.etag, f.read(made).second)
+        assertEquals(made.etag, f.list().songs.getValue(made.fileId).etag)
+        assertEquals("\"abc\"", canonicalEtag("W/\"abc-gzip\""))
+        assertEquals("\"abc\"", canonicalEtag("abc"))
+        assertEquals("\"abc\"", canonicalEtag("\"abc\""))
+    }
+
+    @Test fun setlistsSettleOverTheWireWithoutCopies() {
+        val phone = object : LocalLists {
+            var all = listOf<com.wanderwildwood.utahon.data.Setlist>()
+            var mark = "s0"
+            var n = 0
+            override fun lists() = all
+            override fun stamp() = mark
+            override fun put(lists: List<com.wanderwildwood.utahon.data.Setlist>, expect: String): String? {
+                if (mark != expect) return null
+                all = lists; mark = "s${++n}"; return mark
+            }
+            override fun newId() = "new-${++n}"
+            fun change(lists: List<com.wanderwildwood.utahon.data.Setlist>) { all = lists; mark = "s${++n}" }
+        }
+        var link: ListsLink? = null
+        fun sync() { link = SetlistSync.run(folder(), phone, link, " (phone)") }
+        folder().list()
+        val friday = com.wanderwildwood.utahon.data.Setlist("f", "Friday")
+        // Made here, sent; songs added here twice, sent each time: one list, never a copy.
+        phone.change(listOf(friday)); sync()
+        phone.change(listOf(friday.copy(songs = listOf("a")))); sync()
+        phone.change(listOf(friday.copy(songs = listOf("a", "b")))); sync()
+        sync()
+        assertEquals(listOf(friday.copy(songs = listOf("a", "b"))), phone.all)
+        assertEquals(phone.all, SetlistSync.fromFile(files.getValue(root + SetlistSync.FILE).text))
+        // Changed there: taken here, once, and then quiet.
+        files.getValue(root + SetlistSync.FILE).apply { text = SetlistSync.toFile(listOf(friday.copy(songs = listOf("b")))); etag = tag() }
+        sync()
+        assertEquals(listOf("b"), phone.all.single().songs)
+        val after = files.getValue(root + SetlistSync.FILE).etag
+        sync()
+        assertEquals(after, files.getValue(root + SetlistSync.FILE).etag)
+        assertEquals(1, phone.all.size)
+    }
+
+    @Test fun aSongFetchedIsNotFetchedAgainNorCopiedWhenChangedHere() {
+        val phone = SyncTest.Phone()
+        var links = emptyMap<String, Link>()
+        fun sync() { Sync(folder(), phone, links, " (phone)").also { it.run(); links = it.links.toMap() } }
+        folder().list()
+        files[root + "Paper Boats.cho"] = Stored(next++, "{title: Paper Boats}\n[Am]Folded up the [F]morning news\n", tag())
+        sync()
+        val got = phone.songs().single()
+        // Changed here after it came down: sent up, one song still, no "(phone)" copy.
+        phone.save(got.copy(capo = 2))
+        sync()
+        assertEquals(listOf("Paper Boats"), phone.songs().map { it.title })
+        assertEquals(1, files.size)
+        assertTrue(files.values.single().text.contains("{capo: 2}"))
     }
 
     @Test fun aWrongPasswordIsRefusedAndASilentServerUnreachable() {

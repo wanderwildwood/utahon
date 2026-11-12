@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -145,14 +146,21 @@ fun SetlistScreen(store: Store, id: String, onBack: () -> Unit, onOpen: (String,
                 PagedColumn(modifier = Modifier.heightIn(max = 380.dp)) {
                     all.forEach { song ->
                         item(key = song.id) {
-                            CheckRow(
-                                Words.heading(song).ifBlank { stringResource(R.string.untitled) },
-                                song.id in list.songs,
-                                { on ->
-                                    setlists.change(id) { l -> if (on) l.copy(songs = l.songs + song.id) else l.copy(songs = l.songs.filterNot { it == song.id }) }
-                                },
-                                Modifier.heightIn(min = 48.dp),
-                            )
+                            val inList = song.id in list.songs
+                            val toggle = { on: Boolean ->
+                                setlists.change(id) { l -> if (on) l.copy(songs = l.songs + song.id) else l.copy(songs = l.songs.filterNot { it == song.id }) }
+                            }
+                            Row(
+                                Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { toggle(!inList) }.padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                com.mudita.mmd.components.checkbox.CheckboxMMD(checked = inList, onCheckedChange = toggle)
+                                Spacer(Modifier.width(8.dp))
+                                Column(Modifier.weight(1f)) {
+                                    TextMMD(text = song.title.ifBlank { stringResource(R.string.untitled) }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    if (song.artist.isNotBlank()) TextMMD(text = song.artist, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
                         }
                     }
                 }

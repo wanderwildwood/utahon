@@ -335,12 +335,13 @@ private suspend fun LazyListState.stepOn(): Boolean {
     val info = layoutInfo
     val height = info.viewportSize.height - info.afterContentPadding
     val last = info.totalItemsCount - 1
-    val rows = info.visibleItemsInfo.filter { it.index <= last }
+    val rows = info.visibleItemsInfo
     if (rows.isEmpty()) return false
-    val whole = rows.filter { it.offset >= 0 && it.offset + it.size <= height }
-    if (whole.any { it.index == last }) return false
+    if (rows.any { it.index == last && it.offset + it.size <= height }) return false
     val first = rows.first().index
-    val target = (whole.getOrNull(stride(whole.size))?.index ?: (first + 1)).coerceAtLeast(first + 1).coerceAtMost(last)
+    // The first row that starts a third of the way down or lower, so a step is the same reach
+    // down the page whether the rows are a title, a line of words or a system of tablature.
+    val target = (rows.firstOrNull { it.offset >= height / 3 }?.index ?: (first + 1)).coerceAtLeast(first + 1).coerceAtMost(last)
     scrollToItem(target)
     return true
 }
@@ -433,68 +434,112 @@ private fun SaidRow(line: SheetLine.Said, style: TextStyle, shown: (Chord) -> Ch
 }
 
 /**
- * A line of words with its chords over it. The words wrap as a sentence does; each chord stays
- * over the syllable it was written over, and pressing the chord or its syllable shows the chord.
+ * A line of words with its chords over it, set the way a songbook sets one: the words run on as
+ * a sentence and wrap like one, and each chord stands over the syllable it was written over,
+ * reaching out over the words that follow when its name is wider than its syllable. Words are
+ * only pushed apart where two chords would otherwise run into each other. A line of the wrapped
+ * sentence with no chord on it is only as tall as its words. Pressing a chord or its syllable
+ * shows the chord.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SungRow(line: SheetLine.Sung, style: TextStyle, shown: (Chord) -> Chord, onChord: (Chord) -> Unit) {
     val words = remember(line) { Sheet.words(line) }
-    WordFlow(gap = 5.dp, modifier = Modifier.padding(vertical = 2.dp)) {
-        for (word in words) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                for (piece in word) {
-                    val c = piece.chord?.let(shown)
-                    if (c == null) {
-                        // No chord over it: only the words, so a wrapped line with no chord on it
-                        // sits close under the line before, with no empty row above it.
-                        TextMMD(text = piece.text, style = style)
-                    } else {
-                        Column(Modifier.clickable { onChord(c) }) {
-                            // Room after a chord, so the next one never runs into it.
-                            TextMMD(text = c.name, style = style, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 4.dp))
-                            TextMMD(text = piece.text, style = style)
-                        }
-                    }
-                }
+    // Flat, in order: every piece with the word it is part of.
+    val plan = remember(words) { words.flatMapIndexed { w, word -> word.map { piece -> w to piece } } }
+    androidx.compose.ui.layout.Layout(
+        modifier = Modifier.padding(vertical = 2.dp),
+        content = {
+            // For every piece its words, then its chord if it has one.
+            for ((_, piece) in plan) {
+                val c = piece.chord?.let(shown)
+                TextMMD(text = piece.text, style = style, softWrap = false, modifier = if (c != null) Modifier.clickable { onChord(c) } else Modifier)
+                if (c != null) TextMMD(text = c.name, style = style, fontWeight = FontWeight.Bold, softWrap = false, modifier = Modifier.clickable { onChord(c) })
+            }
+        },
+    ) { measurables, constraints ->
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        var m = 0
+        val texts = ArrayList<androidx.compose.ui.layout.Placeable>()
+        val chords = ArrayList<androidx.compose.ui.layout.Placeable?>()
+        for ((_, piece) in plan) {
+            texts += measurables[m++].measure(loose)
+            chords += if (piece.chord != null) measurables[m++].measure(loose) else null
+        }
+        val places = sungPlaces(
+            plan.indices.map { SungPiece(plan[it].first, texts[it].width, chords[it]?.width ?: -1) },
+            constraints.maxWidth, space = 5.dp.roundToPx(), between = 8.dp.roundToPx(),
+        )
+        val textHeight = texts.maxOfOrNull { it.height } ?: 0
+        val chordHeight = chords.maxOfOrNull { it?.height ?: 0 } ?: 0
+        val lines = (places.maxOfOrNull { it.line } ?: 0) + 1
+        val chorded = BooleanArray(lines)
+        places.forEachIndexed { i, at -> if (chords[i] != null) chorded[at.line] = true }
+        val tops = IntArray(lines)
+        var y = 0
+        for (l in 0 until lines) {
+            tops[l] = y
+            y += textHeight + if (chorded[l]) chordHeight else 0
+        }
+        layout(constraints.maxWidth, y) {
+            places.forEachIndexed { i, at ->
+                val top = tops[at.line]
+                chords[i]?.place(at.chordX, top)
+                texts[i].place(at.textX, top + if (chorded[at.line]) chordHeight else 0)
             }
         }
     }
 }
 
+/** One piece of a sung line as its layout sees it: which word it is part of, how wide its words are, and its chord (-1 for none). */
+internal data class SungPiece(val word: Int, val text: Int, val chord: Int)
+
+/** Where a piece goes: the line of the wrapped sentence, where its words start and where its chord does. */
+internal data class SungPlace(val line: Int, val textX: Int, val chordX: Int)
+
 /**
- * Words set one after another and wrapped like a sentence, each line as tall as its tallest
- * word and the words standing on its foot. Unlike a flow of equal rows, a line whose words carry
- * no chord is only as tall as the words.
+ * Sets the pieces of a sung line in a width: words one after another with [space] between, a
+ * word never broken across lines, a chord over the start of its piece. A piece is moved right
+ * only when its chord would otherwise start before the chord ahead of it has ended ([between]
+ * clear of it). A word, with the chords on it, that will not fit on the line starts the next.
  */
-@Composable
-private fun WordFlow(gap: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    androidx.compose.ui.layout.Layout(content = content, modifier = modifier) { measurables, constraints ->
-        val space = gap.roundToPx()
-        val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
-        // Each line: where it starts down the row, how tall it is, and its words with their x.
-        class Line(var height: Int = 0, val words: MutableList<Pair<androidx.compose.ui.layout.Placeable, Int>> = mutableListOf())
-        val lines = mutableListOf(Line())
-        var x = 0
-        for (p in placeables) {
-            if (x > 0 && x + p.width > constraints.maxWidth) {
-                lines += Line()
-                x = 0
+internal fun sungPlaces(pieces: List<SungPiece>, width: Int, space: Int, between: Int): List<SungPlace> {
+    val out = ArrayList<SungPlace>(pieces.size)
+    var line = 0
+    var x = 0
+    var chordEnd = Int.MIN_VALUE / 2
+    var i = 0
+    while (i < pieces.size) {
+        var end = i
+        while (end < pieces.size && pieces[end].word == pieces[i].word) end++
+        // The word tried at a place: where its pieces land, where its words end and where its last chord does.
+        fun set(fromX: Int, fromChordEnd: Int, onLine: Int): Triple<List<SungPlace>, Int, Int> {
+            var sx = fromX
+            var ce = fromChordEnd
+            val placed = ArrayList<SungPlace>()
+            for (k in i until end) {
+                val p = pieces[k]
+                var px = sx
+                if (p.chord >= 0) {
+                    px = maxOf(px, ce + between)
+                    ce = px + p.chord
+                }
+                placed += SungPlace(onLine, px, px)
+                sx = px + p.text
             }
-            val line = lines.last()
-            line.words += p to x
-            line.height = maxOf(line.height, p.height)
-            x += p.width + space
+            return Triple(placed, sx, ce)
         }
-        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else lines.maxOf { l -> l.words.lastOrNull()?.let { it.second + it.first.width } ?: 0 }
-        layout(width, lines.sumOf { it.height }.coerceAtLeast(constraints.minHeight)) {
-            var y = 0
-            for (line in lines) {
-                for ((p, at) in line.words) p.place(at, y + line.height - p.height)
-                y += line.height
-            }
+        var tried = set(x, chordEnd, line)
+        if (x > 0 && maxOf(tried.second, tried.third) > width) {
+            line++
+            chordEnd = Int.MIN_VALUE / 2
+            tried = set(0, chordEnd, line)
         }
+        out += tried.first
+        x = tried.second + space
+        chordEnd = tried.third
+        i = end
     }
+    return out
 }
 
 /** Where the fingers go for one chord, and another way to play it where there is one. */

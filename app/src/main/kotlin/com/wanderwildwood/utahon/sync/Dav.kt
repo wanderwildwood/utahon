@@ -292,10 +292,17 @@ class NextcloudFolder(
 /** One entry of a WebDAV listing. [path] is decoded; a folder's ends in "/". */
 data class Entry(val path: String, val etag: String?, val isFolder: Boolean, val fileId: String?)
 
-/** An etag as a header carries it, quoted; some servers list it bare. */
+/**
+ * An etag in one form, however it came: quoted, as a listing gives it. Some servers list it
+ * bare; and a web server that compresses a file on its way out marks the etag it sends with it
+ * as weak ("W/") or tacks "-gzip" on inside the quotes, so the same file's etag read with the
+ * file is not the one its listing gives. Left as it came, a file just read looked changed at
+ * the next sync, every time (found on a real Nextcloud, 11 Nov 2026).
+ */
 fun canonicalEtag(etag: String): String {
-    val t = etag.trim()
-    return if (t.startsWith("\"") || t.startsWith("W/\"")) t else "\"$t\""
+    var t = etag.trim().removePrefix("W/").trim('"')
+    for (mark in listOf("-gzip", "--gzip", "-br", "-deflate", ";gzip")) t = t.removeSuffix(mark)
+    return "\"$t\""
 }
 
 /**
