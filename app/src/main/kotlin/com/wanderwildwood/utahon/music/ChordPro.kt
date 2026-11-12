@@ -108,7 +108,7 @@ object ChordPro {
         return if (w.isBlank()) listOf(chords.toString().trim().replace(Regex(" +"), "  ")) else listOf(chords.toString().trimEnd(), w)
     }
 
-    /** A song as a ChordPro file, its chords moved by [semitones]. */
+    /** A song as a ChordPro file, its chords and tablature moved by [semitones]. */
     fun write(title: String, artist: String, capo: Int, key: String, lines: List<SheetLine>, semitones: Int): String {
         val flats = Sheet.flats(lines, semitones)
         fun name(c: Chord) = "[" + c.transposed(semitones, flats).name + "]"
@@ -118,7 +118,7 @@ object ChordPro {
         if (capo > 0) sb.append("{capo: ").append(capo).append("}\n")
         if (key.isNotBlank() && semitones == 0) sb.append("{key: ").append(key).append("}\n")
         if (sb.isNotEmpty()) sb.append('\n')
-        for (l in lines) {
+        for (l in Tablature.movedLines(lines, semitones)) {
             when (l) {
                 SheetLine.Blank -> Unit
                 is SheetLine.Part -> sb.append("{comment: ").append(l.name).append('}')

@@ -66,6 +66,7 @@ import com.wanderwildwood.utahon.music.Instrument
 import com.wanderwildwood.utahon.music.Mark
 import com.wanderwildwood.utahon.music.Sheet
 import com.wanderwildwood.utahon.music.SheetLine
+import com.wanderwildwood.utahon.music.Tablature
 import com.wanderwildwood.utahon.music.Voicings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -143,6 +144,8 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
     val flats = remember(lines, song.transpose) { Sheet.flats(lines, song.transpose) }
     val chords = remember(lines, song.transpose, flats) { Sheet.chords(lines).map { it.transposed(song.transpose, flats) }.distinctBy { it.name } }
     fun shown(c: Chord) = c.transposed(song.transpose, flats)
+    // Tablature moves with the chords: every fret up or down by as much.
+    val shownLines = remember(lines, song.transpose) { Tablature.movedLines(lines, song.transpose) }
 
     val sideways = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var chord by remember { mutableStateOf<Chord?>(null) }
@@ -307,7 +310,7 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
                 }
                 }
                 var n = 0
-                for (line in lines) {
+                for (line in shownLines) {
                     val key = "l${n++}"
                     when (line) {
                         SheetLine.Blank -> item(key = key) { Spacer(Modifier.height(12.dp)) }

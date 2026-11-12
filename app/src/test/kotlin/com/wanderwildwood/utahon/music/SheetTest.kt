@@ -83,10 +83,12 @@ class SheetTest {
         val moved = Sheet.plain(Sheet.read(song), 2)
         assertTrue(moved, moved.contains("D              Bm\nLantern on the gatepost"))
         assertTrue(moved, moved.contains("D  Bm  A  (x2)"))
-        assertTrue(moved, moved.contains("e|-3-------0-------|"))
+        // The tablature goes up two frets with the chords.
+        assertTrue(moved, moved.contains("e|-5-------2-------|\nB|---2-------3-----|\nG|-----2-------2---|"))
         assertTrue(moved, moved.contains("[Verse 1]"))
         // Unmoved, the chords stand where they stood.
         assertTrue(Sheet.plain(Sheet.read(song), 0).contains("       F           G\nShows the road is long"))
+        assertTrue(Sheet.plain(Sheet.read(song), 0).contains("e|-3-------0-------|"))
     }
 
     @Test fun aLongerNameDoesNotRunIntoTheNext() {

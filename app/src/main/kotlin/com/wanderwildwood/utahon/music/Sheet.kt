@@ -46,7 +46,7 @@ object Sheet {
     private val PART = Regex("""^\s*\[([^\[\]]{1,40})]\s*$""")
     private val FILLER = Regex("""^(?:\||\|\||:\||\|:|-+|/+|%|\*+|\(?[xX]\s?\d+\)?|\(?\d+[xX]\)?|N\.?C\.?|\(|\)|,|\.+)$""")
     private val TAB_REST = Regex("""[-0-9|hpbrstvxHPBRSTVX/\\~().<>^=*:\s]""")
-    private val TAB_HEAD = Regex("""^\s*[A-Ga-g][#b]?\s*(?=[|:\-])""")
+    internal val TAB_HEAD = Regex("""^\s*[A-Ga-g][#b]?\s*(?=[|:\-])""")
     private val SPACES = Regex("""\s+""")
 
     fun read(text: String): List<SheetLine> {
@@ -235,13 +235,14 @@ object Sheet {
 
     /**
      * The song as plain text again, every chord moved by [semitones]: chords back over their
-     * words at their columns, nudged right where a longer name would run into the next.
+     * words at their columns, nudged right where a longer name would run into the next. Tablature
+     * moves with them.
      */
     fun plain(lines: List<SheetLine>, semitones: Int): String {
         val flats = flats(lines, semitones)
         fun name(c: Chord) = c.transposed(semitones, flats).name
         val sb = StringBuilder()
-        for (l in lines) {
+        for (l in Tablature.movedLines(lines, semitones)) {
             when (l) {
                 SheetLine.Blank -> Unit
                 is SheetLine.Part -> sb.append('[').append(l.name).append(']')
