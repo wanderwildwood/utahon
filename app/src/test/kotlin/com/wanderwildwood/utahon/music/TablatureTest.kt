@@ -32,6 +32,37 @@ class TablatureTest {
         assertEquals(listOf("e|-7--9--|", "B|--7h9--|"), Tablature.moved(listOf("e|-10-12-|", "B|-10h12-|"), -3))
     }
 
+    @Test fun aNumberThatShrinksPutsNoDashInsideWhatItIsJoinedTo() {
+        // A ghost note, a harmonic and a run of hammer-ons and pull-offs: the dash comes after.
+        assertEquals(listOf("e|-(7)--5--|"), Tablature.moved(listOf("e|-(12)-10-|"), -5))
+        assertEquals(listOf("E|-<9>--<4>-|"), Tablature.moved(listOf("E|-<12>-<7>-|"), -3))
+        assertEquals(listOf("e|--7h9p7---|"), Tablature.moved(listOf("e|-10h12p10-|"), -3))
+        // With no dash left on the row, it goes on the end.
+        assertEquals(listOf("e|-(7)-"), Tablature.moved(listOf("e|-(12)"), -5))
+    }
+
+    @Test fun numbersWrittenTogetherDoNotBecomeOneFret() {
+        // Frets 3 and 5 down two are 1 and 3, not 13.
+        assertEquals(listOf("e|-1-3-|", "B|-----|"), Tablature.moved(listOf("e|-35-|", "B|----|"), -2))
+        assertEquals(listOf("e|-1-10-|"), Tablature.moved(listOf("e|-09-|"), 1))
+        assertEquals(listOf("e|-1-3--|"), Tablature.moved(listOf("e|-1012-|"), -9))
+        assertEquals(listOf(1, 3), Tablature.frets("e|-1-3-|").map { it.number })
+    }
+
+    @Test fun noFretGoesPastTheEndOfTheNeck() {
+        // Up eleven would ask for fret 25: the same notes are one fret down.
+        assertEquals(listOf("e|-13-|"), Tablature.moved(listOf("e|-14-|"), 11))
+        assertEquals(-1, Tablature.shift(Sheet.read("e|-14---14---14-|"), 11))
+        // An open string and fret 15 cannot go down one, nor up eleven: left as written.
+        val wide = listOf("e|-0-15-|")
+        assertSame(wide, Tablature.moved(wide, -1))
+        val lines = Sheet.read("e|-0---15---0---|")
+        assertEquals(0, Tablature.shift(lines, -1))
+        assertSame(lines, Tablature.movedLines(lines, -1))
+        // The same tablature still goes up while it fits.
+        assertEquals(listOf("e|-9-24-|"), Tablature.moved(wide, 9))
+    }
+
     @Test fun movesDownWhileNoFretGoesBelowTheOpenString() {
         assertEquals(listOf("e|-3-1-|"), Tablature.moved(listOf("e|-5-3-|"), -2))
     }
