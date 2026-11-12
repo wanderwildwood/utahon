@@ -146,6 +146,9 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
     fun shown(c: Chord) = c.transposed(song.transpose, flats)
     // Tablature moves with the chords: every fret up or down by as much.
     val shownLines = remember(lines, song.transpose) { Tablature.movedLines(lines, song.transpose) }
+    val hasTab = remember(lines) { lines.any { it is SheetLine.Tab } }
+    // Tablature that fits the neck neither way stays as written while the chords move: said on the sheet.
+    val tabAsWritten = remember(lines, song.transpose) { Tablature.asWritten(lines, song.transpose) }
 
     val sideways = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var chord by remember { mutableStateOf<Chord?>(null) }
@@ -298,11 +301,15 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
                         )
                     }
                 }
-                if (chords.isNotEmpty()) {
+                // A song of tablature alone moves too: every fret up or down.
+                if (chords.isNotEmpty() || hasTab) {
                     item(key = "key") {
                         Mover(
                             // With the song's key known, the key it is now in is said beside how far it moved.
-                            label = Words.moved(context, song.transpose, Chord.parse(song.key)?.transposed(song.transpose, flats)?.name),
+                            label = Words.moved(
+                                context, song.transpose, Chord.parse(song.key)?.transposed(song.transpose, flats)?.name,
+                                chords = chords.isNotEmpty(),
+                            ),
                             onDown = { store.set(id) { it.copy(transpose = wrap(it.transpose - 1)) } },
                             onUp = { store.set(id) { it.copy(transpose = wrap(it.transpose + 1)) } },
                         )
@@ -310,8 +317,16 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
                 }
                 }
                 var n = 0
+                var noted = false
                 for (line in shownLines) {
                     val key = "l${n++}"
+                    // Once, above the first tablature, upright or sideways: the reader meets it before the frets.
+                    if (tabAsWritten && !noted && line is SheetLine.Tab) {
+                        noted = true
+                        item(key = "tab-as-written") {
+                            TextMMD(text = stringResource(R.string.tab_as_written), style = body, modifier = Modifier.padding(top = 6.dp, end = 8.dp))
+                        }
+                    }
                     when (line) {
                         SheetLine.Blank -> item(key = key) { Spacer(Modifier.height(12.dp)) }
                         is SheetLine.Part -> item(key = key) {

@@ -21,10 +21,13 @@ object Words {
     /** Whether a song's tuning is worth a word: it has one, and it is not the usual. */
     fun showsTuning(song: Song): Boolean = song.tuning.isNotBlank() && song.tuning != STANDARD
 
-    /** How far the chords have been moved from the way the sheet was written. */
-    fun moved(context: Context, semitones: Int, key: String? = null): String {
+    /**
+     * How far the song has been moved from the way the sheet was written. A sheet with no
+     * [chords] on it, only tablature, is not said to have its chords as written.
+     */
+    fun moved(context: Context, semitones: Int, key: String? = null, chords: Boolean = true): String {
         val how = when {
-            semitones == 0 -> return context.getString(R.string.key_as_written)
+            semitones == 0 -> return context.getString(if (chords) R.string.key_as_written else R.string.key_tab_as_written)
             semitones > 0 -> context.resources.getQuantityString(R.plurals.key_up, semitones, semitones)
             else -> context.resources.getQuantityString(R.plurals.key_down, -semitones, -semitones)
         }

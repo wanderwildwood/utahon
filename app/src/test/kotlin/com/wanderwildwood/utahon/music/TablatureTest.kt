@@ -1,6 +1,7 @@
 package com.wanderwildwood.utahon.music
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -61,6 +62,37 @@ class TablatureTest {
         assertSame(lines, Tablature.movedLines(lines, -1))
         // The same tablature still goes up while it fits.
         assertEquals(listOf("e|-9-24-|"), Tablature.moved(wide, 9))
+    }
+
+    @Test fun tablatureThatCannotMoveSaysItStaysAsWritten() {
+        // An open string and fret 15 fit the neck neither down one nor up eleven.
+        val wide = Sheet.read("G  C\n\ne|-0---15---0---|")
+        assertTrue(Tablature.asWritten(wide, -1))
+        assertSame(wide, Tablature.movedLines(wide, -1))
+        // The chords still move, on the sheet and in what is shared: only the tablature stays.
+        assertTrue(Sheet.plain(wide, -1).contains("F#  B\n\ne|-0---15---0---|"))
+        // One system that cannot move keeps every other where it was written too.
+        val two = Sheet.read("e|-0---15---0---|\n\nla la la\n\ne|-5---7---5---|")
+        assertTrue(Tablature.asWritten(two, -1))
+        assertSame(two, Tablature.movedLines(two, -1))
+        // The same tablature moved where it fits says nothing.
+        assertFalse(Tablature.asWritten(wide, 9))
+        assertFalse(Tablature.asWritten(wide, 0))
+    }
+
+    @Test fun aMoveThatIsMadeAnOctaveAwayIsNotAsWritten() {
+        // Down two goes up ten instead, up eleven goes down one: moved, so nothing to say.
+        assertFalse(Tablature.asWritten(Sheet.read("e|-3---0---3---|"), -2))
+        assertFalse(Tablature.asWritten(Sheet.read("e|-14---14---14-|"), 11))
+        // A whole octave lands every fret where it was written: that is the move, not a refusal.
+        val high = Sheet.read("e|-14---14---14-|")
+        assertEquals(0, Tablature.shift(high, 12))
+        assertFalse(Tablature.asWritten(high, 12))
+    }
+
+    @Test fun aSongWithNoFretsHasNothingLeftAsWritten() {
+        assertFalse(Tablature.asWritten(Sheet.read("C  G\nla la"), 5))
+        assertFalse(Tablature.asWritten(Sheet.read("e|---------------|\nB|---------------|"), 5))
     }
 
     @Test fun movesDownWhileNoFretGoesBelowTheOpenString() {

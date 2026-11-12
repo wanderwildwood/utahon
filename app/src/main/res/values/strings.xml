@@ -67,6 +67,8 @@
     <!-- %1$s is a key, as Am -->
     <string name="key_is">Key %1$s</string>
     <string name="key_as_written">Chords as written</string>
+    <!-- The same, for a song that is tablature with no chords -->
+    <string name="key_tab_as_written">Tablature as written</string>
     <plurals name="key_up">
         <item quantity="one">Up %1$d semitone</item>
         <item quantity="other">Up %1$d semitones</item>
@@ -78,6 +80,8 @@
 
     <!-- %1$s is how far the chords were moved ("Up 2 semitones"), %2$s the key the song is now in -->
     <string name="key_moved_to">%1$s · Key %2$s</string>
+    <!-- On the sheet, above the first tablature, when the chords were moved and the tablature could not be -->
+    <string name="tab_as_written">The tablature is shown as written: it does not fit the neck in this key.</string>
 
     <string name="scroll_start">Auto scroll</string>
     <string name="scroll_stop">Stop</string>

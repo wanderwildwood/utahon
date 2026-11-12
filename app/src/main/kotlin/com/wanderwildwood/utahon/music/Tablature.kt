@@ -44,26 +44,39 @@ object Tablature {
      * [semitones]. A fret cannot go below the open string, so a move down that would ask for one
      * is played the same notes an octave up instead: down two becomes up ten. Nor can one go past
      * the end of the neck, so a move up that would is played an octave down. Tablature too wide
-     * to fit either way is not moved: it stays as written rather than ask for frets nobody has.
+     * to fit either way is not moved (null): it stays as written rather than ask for frets nobody
+     * has.
      */
-    private fun playable(lowest: Int, highest: Int, semitones: Int): Int {
+    private fun playable(lowest: Int, highest: Int, semitones: Int): Int? {
         val by = when {
             lowest + semitones < 0 -> Math.floorMod(semitones, 12)
             highest + semitones > HIGHEST -> semitones - 12
             else -> semitones
         }
-        return if (lowest + by >= 0 && highest + by <= HIGHEST) by else 0
+        return if (lowest + by >= 0 && highest + by <= HIGHEST) by else null
     }
 
-    /**
-     * How far all the tablature of a song moves when the song is moved by [semitones]: the same
-     * for every system, so a part that goes up an octave takes the rest with it.
-     */
-    fun shift(lines: List<SheetLine>, semitones: Int): Int {
+    /** How far the tablature of [lines] moves for [semitones]; null when it fits the neck neither way. */
+    private fun fitted(lines: List<SheetLine>, semitones: Int): Int? {
         val all = lines.filterIsInstance<SheetLine.Tab>().flatMap { it.rows }.flatMap { frets(it) }
         if (all.isEmpty()) return semitones
         return playable(all.minOf { it.number }, all.maxOf { it.number }, semitones)
     }
+
+    /**
+     * How far all the tablature of a song moves when the song is moved by [semitones]: the same
+     * for every system, so a part that goes up an octave takes the rest with it. Nothing (0)
+     * when it cannot be moved; see [asWritten].
+     */
+    fun shift(lines: List<SheetLine>, semitones: Int): Int = fitted(lines, semitones) ?: 0
+
+    /**
+     * Whether the tablature of a song moved by [semitones] is left as it was written because it
+     * fits the neck neither at that move nor an octave from it: the chords have moved and the
+     * tablature has not, which the sheet has to say. False for a song with no fret written on it,
+     * and for a move of nothing.
+     */
+    fun asWritten(lines: List<SheetLine>, semitones: Int): Boolean = fitted(lines, semitones) == null
 
     /** The lines of a song with its tablature moved by [semitones]; the other lines as they were. */
     fun movedLines(lines: List<SheetLine>, semitones: Int): List<SheetLine> {
@@ -93,7 +106,7 @@ object Tablature {
         val frets = rows.map { frets(it) }
         val written = frets.flatten()
         if (written.isEmpty()) return rows
-        val by = playable(written.minOf { it.number }, written.maxOf { it.number }, semitones)
+        val by = playable(written.minOf { it.number }, written.maxOf { it.number }, semitones) ?: 0
         if (by == 0) return rows
         val starts = rows.map { start(it) }
         // Columns to be added before each column of the system as it was written.
