@@ -58,18 +58,22 @@ design system. It installs on any device with Android 11 or later.
   programs read, or sent as text; both in the key it is shown in.
 
 - **Sync with your own Nextcloud**, if you sign in to one (Settings → Nextcloud). Each song is
-  one ChordPro file in a folder there, so the songs are on any other device signed in to it and
+  one ChordPro file there, in a folder for its artist, so the songs are on any other device signed in to it and
   open in other songbook programs, and a song put in the folder by hand comes here. It is off
   until you sign in, and the app works the same without it.
 
 ## Nextcloud
 
-Signing in goes through Nextcloud's own login page in the browser, as its apps do, and the server
-hands the phone an app password of its own, which can be revoked from the server's security
-settings without touching your real one. A phone with no browser can take an app password typed
-in instead. The folder starts as `Songbook` and can be changed.
+Signing in is typed: the server's address, your login name and an app password made in Nextcloud
+(Personal settings, Security, Devices and sessions), which can be revoked there without touching
+your real one. "Sign in with the browser instead" goes through Nextcloud's own login page, as
+its apps do, for a server that asks for more at its door. The folder starts as `Songbook` and
+can be changed.
 
-A song is one file, named for its title and artist (`Lantern Road - Ada Whitlock.cho`). It syncs
+A song is one file, named for its title, in a folder named for its artist
+(`Ada Whitlock/Lantern Road.cho`); a song that names no artist sits beside the folders. Give a
+song another artist and its file moves; a file put into an artist's folder by hand, with no
+artist written in it, is taken to be by that artist. It syncs
 when the app is opened, a few seconds after a song is saved, set or deleted, when you press Sync
 now, and when the song list is pulled down from its top (a line above it says "Syncing…", then
 "Up to date"). Each side's changes since the last sync are followed:

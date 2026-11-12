@@ -231,6 +231,19 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
                 // opens on it whole.
                 showCutRow = sideways,
             ) {
+                if (sideways) {
+                    // Sideways the page is short and is turned that way to play from: the song says
+                    // who and what it is in one line, and the rest of its head waits upright.
+                    item(key = "head") {
+                        TextMMD(
+                            text = Words.heading(song).ifBlank { stringResource(R.string.untitled) },
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 2.dp),
+                        )
+                    }
+                } else {
                 item(key = "title") {
                     TextMMD(
                         text = song.title.ifBlank { stringResource(R.string.untitled) },
@@ -261,6 +274,7 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
                             onUp = { store.set(id) { it.copy(transpose = wrap(it.transpose + 1)) } },
                         )
                     }
+                }
                 }
                 var n = 0
                 for (line in lines) {
@@ -424,22 +438,58 @@ private fun SaidRow(line: SheetLine.Said, style: TextStyle, shown: (Chord) -> Ch
 @Composable
 private fun SungRow(line: SheetLine.Sung, style: TextStyle, shown: (Chord) -> Chord, onChord: (Chord) -> Unit) {
     val words = remember(line) { Sheet.words(line) }
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.padding(vertical = 2.dp)) {
+    WordFlow(gap = 5.dp, modifier = Modifier.padding(vertical = 2.dp)) {
         for (word in words) {
             Row(verticalAlignment = Alignment.Bottom) {
                 for (piece in word) {
                     val c = piece.chord?.let(shown)
-                    Column(if (c != null) Modifier.clickable { onChord(c) } else Modifier) {
-                        TextMMD(
-                            text = c?.name.orEmpty(),
-                            style = style,
-                            fontWeight = FontWeight.Bold,
-                            // Room after a chord, so the next one never runs into it.
-                            modifier = if (c != null) Modifier.padding(end = 4.dp) else Modifier,
-                        )
+                    if (c == null) {
+                        // No chord over it: only the words, so a wrapped line with no chord on it
+                        // sits close under the line before, with no empty row above it.
                         TextMMD(text = piece.text, style = style)
+                    } else {
+                        Column(Modifier.clickable { onChord(c) }) {
+                            // Room after a chord, so the next one never runs into it.
+                            TextMMD(text = c.name, style = style, fontWeight = FontWeight.Bold, modifier = Modifier.padding(end = 4.dp))
+                            TextMMD(text = piece.text, style = style)
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Words set one after another and wrapped like a sentence, each line as tall as its tallest
+ * word and the words standing on its foot. Unlike a flow of equal rows, a line whose words carry
+ * no chord is only as tall as the words.
+ */
+@Composable
+private fun WordFlow(gap: androidx.compose.ui.unit.Dp, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    androidx.compose.ui.layout.Layout(content = content, modifier = modifier) { measurables, constraints ->
+        val space = gap.roundToPx()
+        val placeables = measurables.map { it.measure(constraints.copy(minWidth = 0, minHeight = 0)) }
+        // Each line: where it starts down the row, how tall it is, and its words with their x.
+        class Line(var height: Int = 0, val words: MutableList<Pair<androidx.compose.ui.layout.Placeable, Int>> = mutableListOf())
+        val lines = mutableListOf(Line())
+        var x = 0
+        for (p in placeables) {
+            if (x > 0 && x + p.width > constraints.maxWidth) {
+                lines += Line()
+                x = 0
+            }
+            val line = lines.last()
+            line.words += p to x
+            line.height = maxOf(line.height, p.height)
+            x += p.width + space
+        }
+        val width = if (constraints.hasBoundedWidth) constraints.maxWidth else lines.maxOf { l -> l.words.lastOrNull()?.let { it.second + it.first.width } ?: 0 }
+        layout(width, lines.sumOf { it.height }.coerceAtLeast(constraints.minHeight)) {
+            var y = 0
+            for (line in lines) {
+                for ((p, at) in line.words) p.place(at, y + line.height - p.height)
+                y += line.height
             }
         }
     }

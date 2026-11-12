@@ -139,6 +139,9 @@
     <string name="field_artist">Artist</string>
     <string name="field_text">Chords and words, or tab</string>
     <string name="field_text_note">Put chords on a line of their own, over the words they go with. A line in square brackets, such as [Chorus], names a part. A ChordPro sheet can be pasted as it is.</string>
+    <!-- Under the sheet box in the editor, when a line runs past its edge: move the box toward the lines' start or end -->
+    <string name="edit_left">To the start of the lines</string>
+    <string name="edit_right">Further along the lines</string>
     <string name="field_capo">Capo on fret</string>
     <string name="field_tuning">Tuning</string>
     <string name="field_tuning_hint" translatable="false">D A D G B E</string>
@@ -181,12 +184,15 @@
     <string name="cloud_server">Server address</string>
     <string name="cloud_server_hint" translatable="false">cloud.example.org</string>
     <string name="cloud_sign_in">Sign in</string>
-    <string name="cloud_type_password">Type an app password instead</string>
+    <string name="cloud_browser">Sign in with the browser instead</string>
+    <string name="cloud_fill_all">Fill in the server address, your login name and an app password.</string>
+    <string name="cloud_server_first">Type the server address first.</string>
+    <string name="cloud_browser_lost">The server stopped answering while this waited for the browser. Type an app password above instead.</string>
     <string name="cloud_user">Login name</string>
     <string name="cloud_app_password">App password</string>
     <string name="cloud_app_password_note">Make one in Nextcloud under Personal settings, Security, Devices and sessions.</string>
     <string name="cloud_waiting">Finish signing in in the browser; this waits for it.</string>
-    <string name="cloud_no_browser">There is no browser on this phone. Type an app password instead.</string>
+    <string name="cloud_no_browser">There is no browser on this phone. Type an app password above instead.</string>
     <string name="cloud_needs_https">Songbook only signs in to a server over https. Use an address that starts with https://, or type just the name.</string>
     <string name="cloud_unreachable">Could not reach that server.</string>
     <string name="cloud_refused">The server would not take that login name and password.</string>
@@ -207,7 +213,7 @@
     <string name="cloud_failed_refused">The server would not let this phone in. Was its app password revoked? Sign out and sign in again.</string>
     <string name="cloud_failed">The last sync did not go through. It tries again when the app is opened and after the next change.</string>
     <string name="cloud_folder">Folder</string>
-    <string name="cloud_folder_note">The folder in your Nextcloud files. Each song is one ChordPro file in it, named for its title and artist; the setlists are kept beside them in Setlists.json.</string>
+    <string name="cloud_folder_note">The folder in your Nextcloud files. Each song is one ChordPro file, in a folder named for its artist; the setlists are kept beside them in Setlists.json.</string>
     <string name="cloud_use_folder">Use this folder</string>
     <string name="cloud_sign_out">Sign out</string>
     <string name="cloud_sign_out_armed">Sign out — tap again</string>

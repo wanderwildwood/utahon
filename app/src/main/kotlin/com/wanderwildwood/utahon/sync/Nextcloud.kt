@@ -78,7 +78,10 @@ object LoginFlow {
         return Started(json.getString("login"), poll.getString("endpoint"), poll.getString("token"))
     }
 
-    /** The account, once the reader has finished in the browser, or null while they have not. */
+    /**
+     * The account, once the reader has finished in the browser, or null while they have not.
+     * [Unreachable] when the server did not answer this time.
+     */
     fun poll(started: Started): Account? {
         val request = Request.Builder()
             .url(started.pollUrl)
@@ -98,7 +101,8 @@ object LoginFlow {
             }
         } catch (e: IOException) {
             if (e is Refused) throw e
-            null
+            // Said to the caller, who counts them: a hand-over that keeps failing is not "still waiting".
+            throw Unreachable(e.message ?: "no answer")
         }
     }
 

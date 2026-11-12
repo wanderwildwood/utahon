@@ -40,7 +40,7 @@ object SongFile {
     }
 
     /** The song a file holds, or null when it holds neither a title nor a sheet. */
-    fun fromFile(text: String, fileName: String): Song? {
+    fun fromFile(text: String, fileName: String, folder: String = ""): Song? {
         val own = HashMap<String, String>()
         val rest = text.replace("\r\n", "\n").split('\n').filter { line ->
             val m = OWN.matchEntire(line) ?: return@filter true
@@ -53,7 +53,8 @@ object SongFile {
         return Song(
             id = own["id"].orEmpty(),
             title = title,
-            artist = pro.artist,
+            // A file with no artist written in it is by whoever's folder it was put in.
+            artist = pro.artist.ifBlank { folder.trim() },
             text = pro.text,
             kind = own["kind"].orEmpty(),
             capo = pro.capo,
@@ -81,13 +82,23 @@ object SongFile {
     private val FORBIDDEN = Regex("""[/:?*"\\<>|\u0000-\u001f]""")
     private const val MAX = 100
 
-    /** The file a song goes in, without its ending: "Lantern Road - Ada Whitlock". */
-    fun fileName(s: Song): String {
-        var n = (if (s.artist.isBlank()) s.title else "${s.title} - ${s.artist}").trim().replace(FORBIDDEN, "_")
+    /** The file a song goes in, without its ending: its title, "Lantern Road". */
+    fun fileName(s: Song): String = clean(s.title).ifEmpty { "Song" }
+
+    /** The folder a song goes in: its artist's, "Ada Whitlock", or none when it names no artist. */
+    fun folderName(s: Song): String = clean(s.artist)
+
+    /** Where a song goes under the song folder: "Ada Whitlock/Lantern Road". */
+    fun place(s: Song): String = placeOf(folderName(s), fileName(s))
+
+    /** How songs were named before each artist had a folder: "Lantern Road - Ada Whitlock", all in one folder. */
+    fun oldName(s: Song): String = clean(if (s.artist.isBlank()) s.title else "${s.title} - ${s.artist}").ifEmpty { "Song" }
+
+    /** A title or an artist as a file or folder name Nextcloud will take and show. */
+    private fun clean(text: String): String {
+        var n = text.trim().replace(FORBIDDEN, "_")
         if (n.codePointCount(0, n.length) > MAX) n = n.substring(0, n.offsetByCodePoints(0, MAX))
         n = n.trim().trimEnd('.')
-        // A name Nextcloud would hide or refuse.
-        if (n.isEmpty()) n = "Song"
         if (n.startsWith(".")) n = "_" + n.substring(1)
         return n
     }

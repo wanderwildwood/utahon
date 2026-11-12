@@ -1,7 +1,11 @@
 package com.wanderwildwood.utahon.ui
 
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -131,11 +135,12 @@ fun EditScreen(store: Store, id: String?, draft: Song?, note: Int, onDone: (Stri
                     TextMMD(text = stringResource(R.string.field_text), style = MaterialTheme.typography.labelSmall)
                     // A sheet's lines are not wrapped: a chord typed over a word has to stay over
                     // it, and a line broken in two puts it over the wrong one. The box is as wide as
-                    // its longest line and is moved sideways by hand to reach the end of one. (The
-                    // one place something here slides: there is no page to turn within a line.)
+                    // its longest line; the two buttons under it move it a boxful at a time.
+                    val across = rememberScrollState()
+                    val moving = rememberCoroutineScope()
                     BoxWithConstraints(Modifier.fillMaxWidth()) {
                         val room = maxWidth
-                        Box(Modifier.horizontalScroll(rememberScrollState())) {
+                        Box(Modifier.horizontalScroll(across)) {
                             TextFieldMMD(
                                 value = text,
                                 onValueChange = { text = it },
@@ -146,6 +151,14 @@ fun EditScreen(store: Store, id: String?, draft: Song?, note: Int, onDone: (Stri
                                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false),
                                 modifier = Modifier.widthIn(min = room).width(IntrinsicSize.Max).textActions(),
                             )
+                        }
+                    }
+                    // A sheet wider than the box is moved a boxful at a time by these two, in one
+                    // step each, so reaching the end of a long line is a page turned, not a slide.
+                    if (across.maxValue > 0) {
+                        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            HouseButton(stringResource(R.string.edit_left), { moving.launch { across.scrollTo((across.value - across.viewportSize * 3 / 4).coerceAtLeast(0)) } }, Modifier.weight(1f), enabled = across.value > 0, compact = true)
+                            HouseButton(stringResource(R.string.edit_right), { moving.launch { across.scrollTo((across.value + across.viewportSize * 3 / 4).coerceAtMost(across.maxValue)) } }, Modifier.weight(1f), enabled = across.value < across.maxValue, compact = true)
                         }
                     }
                     TextMMD(text = stringResource(R.string.field_text_note), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))

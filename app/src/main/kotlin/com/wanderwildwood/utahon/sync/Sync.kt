@@ -16,6 +16,7 @@ data class Link(val id: String, val remote: RemoteSong, val modified: String) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
         .put("fileId", remote.fileId)
+        .put("folder", remote.folder)
         .put("name", remote.name)
         .put("ending", remote.ending)
         .put("etag", remote.etag)
@@ -24,7 +25,7 @@ data class Link(val id: String, val remote: RemoteSong, val modified: String) {
     companion object {
         fun fromJson(o: JSONObject) = Link(
             id = o.getString("id"),
-            remote = RemoteSong(o.getString("fileId"), o.getString("name"), o.getString("ending"), o.getString("etag")),
+            remote = RemoteSong(o.getString("fileId"), o.optString("folder"), o.getString("name"), o.getString("ending"), o.getString("etag")),
             modified = o.getString("modified"),
         )
 
@@ -119,8 +120,11 @@ fun plan(locals: List<Song>, links: Map<String, Link>, listing: Listing): List<A
     val newThere = there.values.filter { it.fileId !in linkedFiles }.toMutableList()
     for (l in locals) {
         if (l.id in linkedIds) continue
-        val name = SongFile.fileName(l)
-        val same = newThere.firstOrNull { it.name.equals(name, ignoreCase = true) }
+        // By the place it would go to, or (in the root) by the name it went by before artists had folders.
+        val place = SongFile.place(l)
+        val old = SongFile.oldName(l)
+        val same = newThere.firstOrNull { it.place.equals(place, ignoreCase = true) }
+            ?: newThere.firstOrNull { it.folder.isEmpty() && it.name.equals(old, ignoreCase = true) }
         if (same != null) {
             newThere -= same
             out += Action.Match(l.id, same)
@@ -160,7 +164,7 @@ class Sync(
         val acted = actions.mapNotNull { linkOf(it)?.id }.toSet()
         val listed = listing.songs.keys
         links.values.removeAll { it.id !in acted && it.remote.fileId !in listed }
-        val taken = listing.names.toMutableSet()
+        val taken = listing.places.toMutableSet()
         for (a in actions) {
             try {
                 act(a, taken)
@@ -168,6 +172,38 @@ class Sync(
                 // Left for the next sync.
             }
         }
+        tidy(taken)
+    }
+
+    /**
+     * Every song in its artist's folder under its title: one that is somewhere else (sent before
+     * artists had folders, put in the wrong one by hand, or given another artist here) is moved,
+     * when it is in step on both sides and the place is free.
+     */
+    private fun tidy(taken: MutableSet<String>) {
+        val here = local.songs().associateBy { it.id }
+        for (link in links.values.toList()) {
+            val mine = here[link.id] ?: continue
+            if (mine.modified != link.modified) continue
+            val moved = try {
+                settle(mine, link.remote, taken)
+            } catch (_: Changed) {
+                continue
+            }
+            if (moved != link.remote) links[link.id] = link.copy(remote = moved)
+        }
+    }
+
+    /** [r] moved to where [s] belongs, if it is not there and the place is free; [r] as it now is. */
+    private fun settle(s: Song, r: RemoteSong, taken: MutableSet<String>): RemoteSong {
+        val folder = SongFile.folderName(s)
+        val name = SongFile.fileName(s)
+        val wanted = placeOf(folder, name)
+        if (wanted == r.place || taken.any { it.equals(wanted, ignoreCase = true) }) return r
+        if (!remote.move(r, folder, name)) return r
+        taken.removeAll { it.equals(r.place, ignoreCase = true) }
+        taken += wanted
+        return r.copy(folder = folder, name = name)
     }
 
     private fun linkOf(a: Action): Link? = when (a) {
@@ -187,20 +223,14 @@ class Sync(
             is Action.Push -> {
                 val mine = here[a.link.id] ?: return
                 val etag = remote.write(a.remote.copy(etag = a.link.remote.etag), SongFile.toFile(mine))
-                var r = a.remote.copy(etag = etag)
+                val r = a.remote.copy(etag = etag)
                 links[mine.id] = Link(mine.id, r, mine.modified)
-                // A new title or artist renames the file too, after the write.
-                val wanted = SongFile.fileName(mine)
-                if (wanted != r.name && taken.none { it.equals(wanted, ignoreCase = true) } && remote.rename(r, wanted)) {
-                    taken -= r.name
-                    taken += wanted
-                    r = r.copy(name = wanted)
-                    links[mine.id] = Link(mine.id, r, mine.modified)
-                }
+                // A new title or artist moves the file too, after the write.
+                links[mine.id] = Link(mine.id, settle(mine, r, taken), mine.modified)
             }
             is Action.Pull -> {
                 val (text, etag) = remote.read(a.remote)
-                val theirs = SongFile.fromFile(text, a.remote.file) ?: return
+                val theirs = SongFile.fromFile(text, a.remote.file, a.remote.folder) ?: return
                 val kept = stamped(theirs.copy(id = a.link.id))
                 if (local.put(kept, here[a.link.id]?.modified)) {
                     links[kept.id] = Link(kept.id, a.remote.copy(etag = etag), kept.modified)
@@ -209,7 +239,7 @@ class Sync(
             is Action.Conflict -> {
                 val mine = here[a.link.id] ?: return
                 val (text, etag) = remote.read(a.remote)
-                val theirs = SongFile.fromFile(text, a.remote.file) ?: return
+                val theirs = SongFile.fromFile(text, a.remote.file, a.remote.folder) ?: return
                 if (SongFile.same(mine, theirs)) {
                     links[mine.id] = Link(mine.id, a.remote.copy(etag = etag), mine.modified)
                     return
@@ -231,7 +261,7 @@ class Sync(
             }
             is Action.DeleteThere -> {
                 remote.delete(a.remote.copy(etag = a.link.remote.etag))
-                taken.removeAll { it.equals(a.remote.name, ignoreCase = true) }
+                taken.removeAll { it.equals(a.remote.place, ignoreCase = true) }
                 links.remove(a.link.id)
             }
             is Action.Forget -> links.remove(a.link.id)
@@ -241,7 +271,7 @@ class Sync(
             }
             is Action.Fetch -> {
                 val (text, etag) = remote.read(a.remote)
-                val theirs = SongFile.fromFile(text, a.remote.file) ?: return
+                val theirs = SongFile.fromFile(text, a.remote.file, a.remote.folder) ?: return
                 val id = theirs.id.takeIf { usable(it) && it !in here && it !in links } ?: local.newId()
                 val kept = stamped(theirs.copy(id = id))
                 if (local.put(kept, null)) links[id] = Link(id, a.remote.copy(etag = etag), kept.modified)
@@ -249,7 +279,7 @@ class Sync(
             is Action.Match -> {
                 val mine = here[a.id] ?: return
                 val (text, etag) = remote.read(a.remote)
-                val theirs = SongFile.fromFile(text, a.remote.file) ?: return
+                val theirs = SongFile.fromFile(text, a.remote.file, a.remote.folder) ?: return
                 if (SongFile.same(mine, theirs)) {
                     links[mine.id] = Link(mine.id, a.remote.copy(etag = etag), mine.modified)
                     return
@@ -265,14 +295,15 @@ class Sync(
         }
     }
 
-    /** [s] sent as a new song, in a file of its name not already there. */
+    /** [s] sent as a new song, in its artist's folder, in a file of its title not already there. */
     private fun send(s: Song, taken: MutableSet<String>) {
         val text = SongFile.toFile(s)
+        val folder = SongFile.folderName(s)
         repeat(5) {
-            val name = SongFile.unique(SongFile.fileName(s), taken)
-            taken += name
+            val place = SongFile.unique(SongFile.place(s), taken)
+            taken += place
             val made = try {
-                remote.create(name, text)
+                remote.create(folder, place.substring(if (folder.isEmpty()) 0 else folder.length + 1), text)
             } catch (_: Taken) {
                 return@repeat
             }

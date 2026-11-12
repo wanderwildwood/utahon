@@ -38,8 +38,8 @@ import java.util.Date
 
 /**
  * Nextcloud: signing in, and once in, the folder, a sync on demand and signing out. Signing in
- * goes through the server's own page in the browser, as Nextcloud's apps do; a phone without a
- * browser (a Kompakt may have none) takes an app password typed in instead.
+ * is typed: the server, the login name and an app password made in Nextcloud. The server's own
+ * page in the browser, as Nextcloud's apps use, is the second way.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +54,6 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
     var server by remember { mutableStateOf("") }
     var user by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var typed by remember { mutableStateOf(false) }
     var waiting by remember { mutableStateOf<Job?>(null) }
     var problem by remember { mutableStateOf<Int?>(null) }
     var newFolder by remember(folder) { mutableStateOf(folder) }
@@ -111,28 +110,41 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                 item(key = "server") {
                     Field(stringResource(R.string.cloud_server), server, { server = it; problem = null }, hint = stringResource(R.string.cloud_server_hint), url = true)
                 }
-                if (typed) {
-                    item(key = "user") { Field(stringResource(R.string.cloud_user), user, { user = it; problem = null }, words = false) }
-                    item(key = "password") {
-                        Field(stringResource(R.string.cloud_app_password), password, { password = it; problem = null }, secret = true)
-                    }
-                    item(key = "password_note") { Note(stringResource(R.string.cloud_app_password_note)) }
+                // The typed way first: it leans on nothing but the three things typed. The
+                // browser's way is the second button, for a server that asks for more at its door.
+                item(key = "user") { Field(stringResource(R.string.cloud_user), user, { user = it; problem = null }, words = false) }
+                item(key = "password") {
+                    Field(stringResource(R.string.cloud_app_password), password, { password = it; problem = null }, secret = true)
                 }
+                item(key = "password_note") { Note(stringResource(R.string.cloud_app_password_note)) }
                 problem?.let { p -> item(key = "problem") { Note(stringResource(p)) } }
                 if (waiting != null) item(key = "waiting") { Note(stringResource(R.string.cloud_waiting)) }
                 item(key = "sign_in") {
                     WideButton(stringResource(R.string.cloud_sign_in), filled = true) {
-                        if (server.isBlank()) return@WideButton
+                        if (server.isBlank() || user.isBlank() || password.isBlank()) {
+                            problem = R.string.cloud_fill_all
+                            return@WideButton
+                        }
                         if (LoginFlow.isPlain(server)) {
                             problem = R.string.cloud_needs_https
                             return@WideButton
                         }
-                        if (typed) {
-                            if (user.isBlank() || password.isBlank()) return@WideButton
-                            keep(Account(LoginFlow.normalise(server), user.trim(), password.trim()))
+                        waiting?.cancel()
+                        keep(Account(LoginFlow.normalise(server), user.trim(), password.trim()))
+                    }
+                }
+                item(key = "browser") {
+                    WideButton(stringResource(R.string.cloud_browser)) {
+                        if (server.isBlank()) {
+                            problem = R.string.cloud_server_first
+                            return@WideButton
+                        }
+                        if (LoginFlow.isPlain(server)) {
+                            problem = R.string.cloud_needs_https
                             return@WideButton
                         }
                         if (waiting != null) return@WideButton
+                        problem = null
                         waiting = scope.launch {
                             try {
                                 val started = runCatching { withContext(Dispatchers.IO) { LoginFlow.start(server) } }.getOrNull()
@@ -146,15 +158,30 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                                     }.isSuccess
                                 if (!opened) {
                                     problem = R.string.cloud_no_browser
-                                    typed = true
                                     return@launch
                                 }
-                                // The server gives twenty minutes to finish signing in.
+                                // The server gives twenty minutes to finish signing in. An answer
+                                // that keeps failing is said, not waited on in silence.
+                                var failed = 0
                                 repeat(600) {
                                     delay(2000)
-                                    val got = runCatching { withContext(Dispatchers.IO) { LoginFlow.poll(started) } }.getOrNull()
+                                    val got = try {
+                                        // An answer, even "not yet", ends a run of failures.
+                                        withContext(Dispatchers.IO) { LoginFlow.poll(started) }.also { failed = 0 }
+                                    } catch (_: Refused) {
+                                        problem = R.string.cloud_refused
+                                        return@launch
+                                    } catch (_: Exception) {
+                                        if (++failed >= 15) {
+                                            problem = R.string.cloud_browser_lost
+                                            return@launch
+                                        }
+                                        null
+                                    }
                                     if (got != null) {
-                                        keep(got)
+                                        // The address typed here, not the one the server calls itself by,
+                                        // which behind a proxy can be a name this phone cannot reach.
+                                        keep(got.copy(server = LoginFlow.normalise(server)))
                                         return@launch
                                     }
                                 }
@@ -163,9 +190,6 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                             }
                         }
                     }
-                }
-                if (!typed) {
-                    item(key = "type") { WideButton(stringResource(R.string.cloud_type_password)) { typed = true; waiting?.cancel() } }
                 }
             }
         }

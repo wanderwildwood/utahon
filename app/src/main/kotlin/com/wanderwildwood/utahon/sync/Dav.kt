@@ -16,15 +16,22 @@ import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * One song in the cloud: its file, named by its id on the server ([fileId], which stays the
- * same when the file is renamed), the file's [name] without its ending, the [ending] it has,
- * and its etag, which changes whenever the file does.
+ * same when the file is renamed or moved), the [folder] it is in (its artist's, or none for a
+ * song that names no artist), the file's [name] without its ending, the [ending] it has, and its
+ * etag, which changes whenever the file does.
  */
-data class RemoteSong(val fileId: String, val name: String, val ending: String, val etag: String) {
+data class RemoteSong(val fileId: String, val folder: String, val name: String, val ending: String, val etag: String) {
     val file: String get() = name + ending
+
+    /** Where it is under the song folder, without its ending: "Ada Whitlock/Lantern Road". */
+    val place: String get() = placeOf(folder, name)
 }
 
-/** The songs in the folder, by [RemoteSong.fileId], and the name (without ending) of every song file in it. */
-data class Listing(val songs: Map<String, RemoteSong>, val names: Set<String>)
+/** A song's place under the song folder: its folder and its name, or the name alone. */
+fun placeOf(folder: String, name: String): String = if (folder.isEmpty()) name else "$folder/$name"
+
+/** The songs in the folder, by [RemoteSong.fileId], and the [RemoteSong.place] of every song file in it. */
+data class Listing(val songs: Map<String, RemoteSong>, val places: Set<String>)
 
 /** The file was not what this phone last saw: changed, or gone, since. */
 class Changed(message: String) : IOException(message)
@@ -34,22 +41,25 @@ class Taken(message: String) : IOException(message)
 
 /** The far end of a sync: a folder of song files. [NextcloudFolder] is the real one. */
 interface Remote {
-    /** Every song file in the folder. */
+    /** Every song file in the folder and in the folders one level inside it. */
     fun list(): Listing
 
     /** The file's text, and its etag as read. [Changed] if it has gone. */
     fun read(r: RemoteSong): Pair<String, String>
 
-    /** A new file of that name (no ending) holding the song. [Taken] if one is already there. */
-    fun create(name: String, text: String): RemoteSong
+    /** A new file of that name (no ending) in [folder], made if it is not there, holding the song. [Taken] if one is already there. */
+    fun create(folder: String, name: String, text: String): RemoteSong
 
     /** The song written over [r]'s file, only if it is still as [r] saw it ([Changed] if not). Its new etag. */
     fun write(r: RemoteSong, text: String): String
 
-    /** [r]'s file renamed to [to] (no ending); false, and nothing done, if [to] is taken. */
-    fun rename(r: RemoteSong, to: String): Boolean
+    /**
+     * [r]'s file moved to [folder] (made if it is not there) under the name [to] (no ending);
+     * false, and nothing done, if that place is taken. A folder the move leaves empty goes.
+     */
+    fun move(r: RemoteSong, folder: String, to: String): Boolean
 
-    /** [r]'s file deleted, only if it is still as [r] saw it ([Changed] if not). */
+    /** [r]'s file deleted, only if it is still as [r] saw it ([Changed] if not); and its folder, if that leaves it empty. */
     fun delete(r: RemoteSong)
 
     /** A file of the app's own beside the songs (the setlists), by its whole name: its text and etag, or null when it is not there. */
@@ -64,7 +74,7 @@ interface Remote {
 
 /**
  * The song folder in a Nextcloud, over WebDAV: `remote.php/dav/files/<user>/<folder>/`, one
- * ChordPro file per song. Nextcloud keeps an etag for every file, says the new one after a
+ * ChordPro file per song, each in a folder named for its artist. Nextcloud keeps an etag for every file, says the new one after a
  * write, honours If-Match and If-None-Match, and gives every file an id that a rename keeps,
  * which is everything this leans on.
  */
@@ -83,6 +93,8 @@ class NextcloudFolder(
         .header("User-Agent", AGENT)
 
     private fun file(name: String) = root + encodePath(name)
+    private fun dir(folder: String) = root + encodePath(folder) + "/"
+    private fun file(r: RemoteSong) = file(if (r.folder.isEmpty()) r.file else r.folder + "/" + r.file)
 
     override fun list(): Listing {
         val top = try {
@@ -94,44 +106,61 @@ class NextcloudFolder(
         }
         val rootPath = decodeHref(root)
         val songs = mutableMapOf<String, RemoteSong>()
-        val names = mutableSetOf<String>()
-        for (entry in top) {
-            if (entry.isFolder || !entry.path.startsWith(rootPath)) continue
-            val file = entry.path.removePrefix(rootPath)
-            if (file.isEmpty() || file.contains('/') || !SongFile.isSong(file)) continue
-            val name = file.substringBeforeLast('.')
-            names += name
-            val id = entry.fileId ?: continue
-            val etag = entry.etag ?: continue
-            songs[id] = RemoteSong(id, name, file.substring(name.length), etag)
+        val places = mutableSetOf<String>()
+        fun take(entries: List<Entry>, under: String, folder: String) {
+            for (entry in entries) {
+                if (entry.isFolder || !entry.path.startsWith(under)) continue
+                val file = entry.path.removePrefix(under)
+                if (file.isEmpty() || file.contains('/') || !SongFile.isSong(file)) continue
+                val name = file.substringBeforeLast('.')
+                places += placeOf(folder, name)
+                val id = entry.fileId ?: continue
+                val etag = entry.etag ?: continue
+                songs[id] = RemoteSong(id, folder, name, file.substring(name.length), etag)
+            }
         }
-        return Listing(songs, names)
+        take(top, rootPath, "")
+        // The artists' folders, one level in; anything deeper is not this app's.
+        for (entry in top) {
+            if (!entry.isFolder || !entry.path.startsWith(rootPath)) continue
+            val folder = entry.path.removePrefix(rootPath).trim('/')
+            if (folder.isEmpty() || folder.contains('/') || folder.startsWith(".")) continue
+            val inside = try {
+                propfind(dir(folder), 1)
+            } catch (_: Missing) {
+                continue
+            }
+            take(inside, decodeHref(dir(folder)), folder)
+        }
+        return Listing(songs, places)
     }
 
     override fun read(r: RemoteSong): Pair<String, String> =
-        call(request(file(r.file)).get().build()) { response ->
-            if (response.code == 404) throw Changed("${r.file} is gone")
+        call(request(file(r)).get().build()) { response ->
+            if (response.code == 404) throw Changed("${r.place} is gone")
             check(response)
             val etag = response.header("ETag")?.let(::canonicalEtag) ?: r.etag
             response.body!!.string() to etag
         }
 
-    override fun create(name: String, text: String): RemoteSong {
-        val file = name + SongFile.EXTENSION
+    override fun create(folder: String, name: String, text: String): RemoteSong {
+        val made = RemoteSong("", folder, name, SongFile.EXTENSION, "")
+        if (folder.isNotEmpty()) makeFolder(folder)
         val etag = try {
-            put(file(file), text, ifMatch = null)
+            put(file(made), text, ifMatch = null)
         } catch (_: Changed) {
-            throw Taken(file)
+            throw Taken(made.place)
         } catch (_: Missing) {
             // The song folder itself is gone from under it.
             makeFolders()
-            put(file(file), text, ifMatch = null)
+            if (folder.isNotEmpty()) makeFolder(folder)
+            put(file(made), text, ifMatch = null)
         }
-        val self = propfind(file(file), 0).firstOrNull() ?: throw IOException("$file is not there after writing it")
-        return RemoteSong(self.fileId ?: throw IOException("no id for $file"), name, SongFile.EXTENSION, self.etag ?: etag)
+        val self = propfind(file(made), 0).firstOrNull() ?: throw IOException("${made.place} is not there after writing it")
+        return made.copy(fileId = self.fileId ?: throw IOException("no id for ${made.place}"), etag = self.etag ?: etag)
     }
 
-    override fun write(r: RemoteSong, text: String): String = put(file(r.file), text, ifMatch = r.etag)
+    override fun write(r: RemoteSong, text: String): String = put(file(r), text, ifMatch = r.etag)
 
     private fun put(url: String, text: String, ifMatch: String?): String {
         val builder = request(url).put(text.toRequestBody(TEXT))
@@ -144,25 +173,50 @@ class NextcloudFolder(
         } ?: propfind(url, 0).firstOrNull()?.etag ?: throw IOException("no etag for $url")
     }
 
-    override fun rename(r: RemoteSong, to: String): Boolean {
-        val request = request(file(r.file)).method("MOVE", null)
-            .header("Destination", file(to + r.ending))
+    override fun move(r: RemoteSong, folder: String, to: String): Boolean {
+        if (folder.isNotEmpty()) makeFolder(folder)
+        val request = request(file(r)).method("MOVE", null)
+            .header("Destination", file(r.copy(folder = folder, name = to)))
             .header("Overwrite", "F")
             .build()
-        return call(request) { response ->
+        val moved = call(request) { response ->
             if (response.code == 412) return@call false
-            if (response.code == 404) throw Changed("${r.file} is gone")
+            if (response.code == 404) throw Changed("${r.place} is gone")
             check(response)
             true
         }
+        if (moved && r.folder != folder) dropIfEmpty(r.folder)
+        return moved
     }
 
     override fun delete(r: RemoteSong) {
-        call(request(file(r.file)).delete().header("If-Match", r.etag).build()) { response ->
-            if (response.code == 412) throw Changed("${r.file} changed")
+        call(request(file(r)).delete().header("If-Match", r.etag).build()) { response ->
+            if (response.code == 412) throw Changed("${r.place} changed")
             if (response.code == 404) return@call
             check(response)
         }
+        dropIfEmpty(r.folder)
+    }
+
+    /** An artist's folder made where it is missing. */
+    private fun makeFolder(folder: String) {
+        call(request(dir(folder)).method("MKCOL", null).build()) { response ->
+            // 405 is "already there".
+            if (response.code != 201 && response.code != 405) check(response)
+        }
+    }
+
+    /** An artist's folder with nothing left in it is taken away; one with anything at all in it is left. */
+    private fun dropIfEmpty(folder: String) {
+        if (folder.isEmpty()) return
+        val left = try {
+            propfind(dir(folder), 1)
+        } catch (_: IOException) {
+            return
+        }
+        val self = decodeHref(dir(folder))
+        if (left.any { it.path != self }) return
+        runCatching { call(request(dir(folder)).delete().build()) { } }
     }
 
     override fun readOwn(file: String): Pair<String, String>? =

@@ -51,11 +51,16 @@ class SongFileTest {
     }
 
     @Test fun namesAFile() {
-        assertEquals("Lantern Road - Ada Whitlock", SongFile.fileName(song))
-        assertEquals("Lantern Road", SongFile.fileName(song.copy(artist = "")))
-        assertEquals("What_ - AC_DC", SongFile.fileName(song.copy(title = "What?", artist = "AC/DC")))
+        assertEquals("Lantern Road", SongFile.fileName(song))
+        assertEquals("Ada Whitlock", SongFile.folderName(song))
+        assertEquals("Ada Whitlock/Lantern Road", SongFile.place(song))
+        assertEquals("Lantern Road", SongFile.place(song.copy(artist = "")))
+        assertEquals("AC_DC/What_", SongFile.place(song.copy(title = "What?", artist = "AC/DC")))
         assertEquals("Song", SongFile.fileName(song.copy(title = "", artist = "")))
         assertEquals("_hidden", SongFile.fileName(song.copy(title = ".hidden", artist = "")))
+        assertEquals("Lantern Road - Ada Whitlock", SongFile.oldName(song))
+        assertEquals("Ada Whitlock", SongFile.fromFile("{title: X}\n[G]la\n", "X.cho", "Ada Whitlock")!!.artist)
+        assertEquals("Tomas Reyes", SongFile.fromFile("{title: X}\n{artist: Tomas Reyes}\n[G]la\n", "X.cho", "Ada Whitlock")!!.artist)
         assertEquals("A (2)", SongFile.unique("A", listOf("a", "B")))
         assertEquals("A", SongFile.unique("A", listOf("B")))
         assertTrue(SongFile.isSong("x.CHO") && SongFile.isSong("x.chordpro") && !SongFile.isSong("x.txt"))

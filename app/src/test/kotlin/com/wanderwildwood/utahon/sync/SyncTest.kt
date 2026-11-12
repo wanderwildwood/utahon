@@ -30,12 +30,15 @@ class SyncTest {
             if (f == null) files[file] = File("${next++}", text, tag()) else { f.text = text; f.etag = tag() }
         }
 
+        /** Files are kept by their path under the song folder: "Ada Whitlock/Lantern Road.cho". */
         override fun list(): Listing {
-            val songs = files.filterKeys { SongFile.isSong(it) }.map { (name, f) ->
-                val stem = name.substringBeforeLast('.')
-                f.id to RemoteSong(f.id, stem, name.substring(stem.length), f.etag)
+            val songs = files.filterKeys { SongFile.isSong(it) && it.count { c -> c == '/' } <= 1 }.map { (path, f) ->
+                val folder = path.substringBeforeLast('/', "")
+                val file = path.substringAfterLast('/')
+                val stem = file.substringBeforeLast('.')
+                f.id to RemoteSong(f.id, folder, stem, file.substring(stem.length), f.etag)
             }.toMap()
-            return Listing(songs, songs.values.map { it.name }.toSet())
+            return Listing(songs, songs.values.map { it.place }.toSet())
         }
 
         private fun fileOf(r: RemoteSong) = files.entries.firstOrNull { it.value.id == r.fileId }
@@ -45,12 +48,12 @@ class SyncTest {
             return f.text to f.etag
         }
 
-        override fun create(name: String, text: String): RemoteSong {
-            val file = name + SongFile.EXTENSION
+        override fun create(folder: String, name: String, text: String): RemoteSong {
+            val file = placeOf(folder, name) + SongFile.EXTENSION
             if (files.keys.any { it.equals(file, ignoreCase = true) }) throw Taken(file)
             val f = File("${next++}", text, tag())
             files[file] = f
-            return RemoteSong(f.id, name, SongFile.EXTENSION, f.etag)
+            return RemoteSong(f.id, folder, name, SongFile.EXTENSION, f.etag)
         }
 
         override fun write(r: RemoteSong, text: String): String {
@@ -62,11 +65,12 @@ class SyncTest {
             return f.etag
         }
 
-        override fun rename(r: RemoteSong, to: String): Boolean {
+        override fun move(r: RemoteSong, folder: String, to: String): Boolean {
             val e = fileOf(r) ?: throw Changed("gone")
-            if (files.keys.any { it.equals(to + r.ending, ignoreCase = true) }) return false
+            val path = placeOf(folder, to) + r.ending
+            if (files.keys.any { it.equals(path, ignoreCase = true) }) return false
             files.remove(e.key)
-            files[to + r.ending] = e.value
+            files[path] = e.value
             return true
         }
 
@@ -127,7 +131,7 @@ class SyncTest {
     @Test fun aSongHereGoesThere() {
         phone.save(lantern())
         sync()
-        assertEquals(setOf("Lantern Road - Ada Whitlock.cho"), cloud.files.keys)
+        assertEquals(setOf("Ada Whitlock/Lantern Road.cho"), cloud.files.keys)
         val text = cloud.files.values.single().text
         assertTrue(text, text.contains("{title: Lantern Road}") && text.contains("[G]Lante[C]rn road") && text.contains("{x_songbook_id: a}"))
         assertEquals(1, links.size)
@@ -146,10 +150,11 @@ class SyncTest {
         assertEquals("Tomas Reyes", s.artist)
         assertEquals("Am            F\nFolded up the morning news\n", s.text)
         assertTrue(s.modified.isNotEmpty())
-        // And it is not sent straight back.
-        val etag = cloud.files.getValue("Paper Boats.cho").etag
+        // It is put in its artist's folder, and not sent straight back.
+        val etag = cloud.files.getValue("Tomas Reyes/Paper Boats.cho").etag
         sync()
-        assertEquals(etag, cloud.files.getValue("Paper Boats.cho").etag)
+        assertEquals(etag, cloud.files.getValue("Tomas Reyes/Paper Boats.cho").etag)
+        assertEquals(setOf("Tomas Reyes/Paper Boats.cho", "notes.txt"), cloud.files.keys)
         assertEquals(1, phone.songs().size)
     }
 
@@ -158,15 +163,22 @@ class SyncTest {
         sync()
         phone.save(phone.all.getValue("a").copy(title = "Lantern Lane", transpose = 2))
         sync()
-        assertEquals(setOf("Lantern Lane - Ada Whitlock.cho"), cloud.files.keys)
+        assertEquals(setOf("Ada Whitlock/Lantern Lane.cho"), cloud.files.keys)
         assertTrue(cloud.files.values.single().text.contains("{x_songbook_transpose: 2}"))
-        assertEquals("Lantern Lane - Ada Whitlock", links.getValue("a").remote.name)
+        assertEquals("Ada Whitlock/Lantern Lane", links.getValue("a").remote.place)
+        // Given to another artist, it moves to that artist's folder; with no artist, to the top.
+        phone.save(phone.all.getValue("a").copy(artist = "Tomas Reyes"))
+        sync()
+        assertEquals(setOf("Tomas Reyes/Lantern Lane.cho"), cloud.files.keys)
+        phone.save(phone.all.getValue("a").copy(artist = ""))
+        sync()
+        assertEquals(setOf("Lantern Lane.cho"), cloud.files.keys)
     }
 
     @Test fun aChangeThereIsFetched() {
         phone.save(lantern())
         sync()
-        cloud.putThere("Lantern Road - Ada Whitlock.cho", "{title: Lantern Road}\n{artist: Ada Whitlock}\n{capo: 4}\n[D]Lantern road\n")
+        cloud.putThere("Ada Whitlock/Lantern Road.cho", "{title: Lantern Road}\n{artist: Ada Whitlock}\n{capo: 4}\n[D]Lantern road\n")
         sync()
         val s = phone.songs().single()
         assertEquals("a", s.id)
@@ -178,12 +190,12 @@ class SyncTest {
         phone.save(lantern())
         sync()
         phone.save(phone.all.getValue("a").copy(text = "Em\nMine now\n"))
-        cloud.putThere("Lantern Road - Ada Whitlock.cho", "{title: Lantern Road}\n{artist: Ada Whitlock}\n[D]Theirs now\n")
+        cloud.putThere("Ada Whitlock/Lantern Road.cho", "{title: Lantern Road}\n{artist: Ada Whitlock}\n[D]Theirs now\n")
         sync()
         assertEquals(listOf("Lantern Road", "Lantern Road (phone)"), titles())
         assertEquals("D\nTheirs now\n", phone.all.getValue("a").text)
         assertEquals(2, cloud.files.size)
-        assertTrue(cloud.files.keys.any { it.startsWith("Lantern Road (phone)") })
+        assertTrue(cloud.files.keys.any { it.startsWith("Ada Whitlock/Lantern Road (phone)") })
     }
 
     @Test fun deletedHereIsDeletedThere() {
@@ -222,16 +234,49 @@ class SyncTest {
 
     @Test fun theSameSongOnBothSidesIsOneSong() {
         val s = phone.save(lantern())
-        cloud.putThere("Lantern Road - Ada Whitlock.cho", SongFile.toFile(s.copy(id = "")))
+        cloud.putThere("Ada Whitlock/Lantern Road.cho", SongFile.toFile(s.copy(id = "")))
         sync()
         assertEquals(1, phone.songs().size)
         assertEquals(1, cloud.files.size)
         assertEquals(1, links.size)
     }
 
+    @Test fun songsSentBeforeArtistsHadFoldersAreMovedIntoThem() {
+        // As 0.1.6 left them: every song in the one folder, named "Title - Artist".
+        val s = phone.save(lantern())
+        val other = phone.save(Song(id = "b", title = "Loose Leaf", text = "G\nla\n"))
+        cloud.putThere("Lantern Road - Ada Whitlock.cho", SongFile.toFile(s))
+        cloud.putThere("Loose Leaf.cho", SongFile.toFile(other))
+        val old = cloud.files.getValue("Lantern Road - Ada Whitlock.cho")
+        links = mapOf(
+            "a" to Link("a", RemoteSong(old.id, "", "Lantern Road - Ada Whitlock", ".cho", old.etag), s.modified),
+            "b" to Link("b", RemoteSong(cloud.files.getValue("Loose Leaf.cho").id, "", "Loose Leaf", ".cho", cloud.files.getValue("Loose Leaf.cho").etag), other.modified),
+        )
+        sync()
+        assertEquals(setOf("Ada Whitlock/Lantern Road.cho", "Loose Leaf.cho"), cloud.files.keys)
+        assertEquals(old.id, cloud.files.getValue("Ada Whitlock/Lantern Road.cho").id)
+        assertEquals("Ada Whitlock", links.getValue("a").remote.folder)
+        assertEquals(2, phone.songs().size)
+        // With the links lost as well (signed in afresh), the old names are still known for the same songs.
+        cloud.files.clear()
+        cloud.putThere("Lantern Road - Ada Whitlock.cho", SongFile.toFile(s.copy(id = "")))
+        links = emptyMap()
+        phone.all.remove("b")
+        sync()
+        assertEquals(setOf("Ada Whitlock/Lantern Road.cho"), cloud.files.keys)
+        assertEquals(1, phone.songs().size)
+    }
+
+    @Test fun aFileWithNoArtistInItIsByItsFolder() {
+        cloud.putThere("Tomas Reyes/Kettle Song.cho", "{title: Kettle Song}\n[D]Kettle on\n")
+        sync()
+        assertEquals("Tomas Reyes", phone.songs().single().artist)
+        assertEquals(setOf("Tomas Reyes/Kettle Song.cho"), cloud.files.keys)
+    }
+
     @Test fun twoDifferentSongsOfOneNameAreBothKept() {
         phone.save(lantern())
-        cloud.putThere("Lantern Road - Ada Whitlock.cho", "{title: Lantern Road}\n{artist: Ada Whitlock}\n[D]Another one entirely\n")
+        cloud.putThere("Ada Whitlock/Lantern Road.cho", "{title: Lantern Road}\n{artist: Ada Whitlock}\n[D]Another one entirely\n")
         sync()
         assertEquals(listOf("Lantern Road", "Lantern Road (phone)"), titles())
         assertEquals(2, cloud.files.size)
@@ -251,7 +296,7 @@ class SyncTest {
         phone.save(lantern())
         sync()
         phone.save(phone.all.getValue("a").copy(capo = 7))
-        cloud.meddle = { cloud.putThere("Lantern Road - Ada Whitlock.cho", "{title: Lantern Road}\n{artist: Ada Whitlock}\n[D]Slipped in\n") }
+        cloud.meddle = { cloud.putThere("Ada Whitlock/Lantern Road.cho", "{title: Lantern Road}\n{artist: Ada Whitlock}\n[D]Slipped in\n") }
         sync()
         // Nothing lost: the server's text is still there, and the next sync sees both changed.
         assertTrue(cloud.files.values.single().text.contains("Slipped in"))

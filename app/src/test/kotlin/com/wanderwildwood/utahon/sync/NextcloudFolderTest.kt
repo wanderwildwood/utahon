@@ -54,6 +54,7 @@ class NextcloudFolderTest {
                 if (path in folders) {
                     out.append(entry(path, "\"dir\"", 1, true))
                     if (x.getHeader("Depth") == "1") {
+                        folders.filter { it != path && it.startsWith(path) && !it.removePrefix(path).trimEnd('/').contains('/') }.forEach { out.append(entry(it, "\"dir\"", 2, true)) }
                         files.filterKeys { it.startsWith(path) && !it.removePrefix(path).contains('/') }.forEach { (p, f) -> out.append(entry(p, f.etag, f.id, false)) }
                     }
                 } else {
@@ -82,11 +83,17 @@ class NextcloudFolderTest {
                 val to = URLDecoder.decode(URI(x.getHeader("Destination")).rawPath.replace("+", "%2B"), "UTF-8")
                 val f = files[path] ?: return answer(404)
                 if (to in files) return answer(412)
+                if (to.substringBeforeLast('/') + "/" !in folders) return answer(409)
                 files.remove(path)
                 files[to] = f
                 answer(201)
             }
             "DELETE" -> {
+                if (path in folders) {
+                    if (files.keys.any { it.startsWith(path) }) return answer(409)
+                    folders.remove(path)
+                    return answer(204)
+                }
                 val f = files[path] ?: return answer(404)
                 if (ifMatch != null && f.etag != ifMatch) return answer(412)
                 files.remove(path)
@@ -117,12 +124,13 @@ class NextcloudFolderTest {
     @Test fun createsReadsWritesRenamesAndDeletes() {
         val f = folder()
         f.list()
-        val made = f.create("Lantern Road - Ada Whitlock", "one")
-        assertEquals("Lantern Road - Ada Whitlock", made.name)
+        val made = f.create("Ada Whitlock", "Lantern Road", "one")
+        assertEquals("Ada Whitlock/Lantern Road", made.place)
         assertEquals(".cho", made.ending)
+        assertTrue(root + "Ada Whitlock/" in folders)
         assertEquals(mapOf(made.fileId to made), f.list().songs)
         assertEquals("one" to made.etag, f.read(made))
-        assertThrows(Taken::class.java) { f.create("Lantern Road - Ada Whitlock", "again") }
+        assertThrows(Taken::class.java) { f.create("Ada Whitlock", "Lantern Road", "again") }
 
         val etag = f.write(made, "two")
         assertFalse(etag == made.etag)
@@ -130,26 +138,35 @@ class NextcloudFolderTest {
         val now = made.copy(etag = etag)
         assertEquals("two", f.read(now).first)
 
-        f.create("Other", "x")
-        assertFalse(f.rename(now, "Other"))
-        assertTrue(f.rename(now, "Lantern Lane & Co"))
+        f.create("", "Other", "x")
+        assertFalse(f.move(now, "", "Other"))
+        // To another artist's folder, which is made for it; the one it leaves empty goes.
+        assertTrue(f.move(now, "Tomas & Co", "Lantern Lane"))
+        assertFalse(root + "Ada Whitlock/" in folders)
         val listed = f.list()
-        assertEquals(setOf("Lantern Lane & Co", "Other"), listed.names)
-        assertEquals(now.fileId, listed.songs.values.first { it.name == "Lantern Lane & Co" }.fileId)
+        assertEquals(setOf("Tomas & Co/Lantern Lane", "Other"), listed.places)
+        assertEquals(now.fileId, listed.songs.values.first { it.name == "Lantern Lane" }.fileId)
 
-        val renamed = listed.songs.getValue(now.fileId)
-        assertThrows(Changed::class.java) { f.delete(renamed.copy(etag = "\"old\"")) }
-        f.delete(renamed)
-        assertEquals(setOf("Other"), f.list().names)
+        val moved = listed.songs.getValue(now.fileId)
+        assertThrows(Changed::class.java) { f.delete(moved.copy(etag = "\"old\"")) }
+        f.delete(moved)
+        assertEquals(setOf("Other"), f.list().places)
+        assertFalse(root + "Tomas & Co/" in folders)
     }
 
     @Test fun onlySongFilesAreListed() {
         folder().list()
         files[root + "notes.txt"] = Stored(7, "x", "\"n\"")
         files[root + "A Song.pro"] = Stored(8, "x", "\"p\"")
+        folders += root + "Ada Whitlock/"
+        folders += root + "Ada Whitlock/Deeper/"
+        files[root + "Ada Whitlock/In A Folder.cho"] = Stored(9, "x", "\"q\"")
+        files[root + "Ada Whitlock/cover.jpg"] = Stored(10, "x", "\"j\"")
+        files[root + "Ada Whitlock/Deeper/Too Deep.cho"] = Stored(11, "x", "\"d\"")
         val l = folder().list()
-        assertEquals(setOf("A Song"), l.names)
+        assertEquals(setOf("A Song", "Ada Whitlock/In A Folder"), l.places)
         assertEquals(".pro", l.songs.getValue("8").ending)
+        assertEquals("Ada Whitlock", l.songs.getValue("9").folder)
     }
 
     @Test fun aWrongPasswordIsRefusedAndASilentServerUnreachable() {
@@ -165,7 +182,7 @@ class NextcloudFolderTest {
         var links = emptyMap<String, Link>()
         fun sync() { Sync(folder(), phone, links, " (phone)").also { it.run(); links = it.links.toMap() } }
         sync()
-        val path = root + "Lantern Road - Ada Whitlock.cho"
+        val path = root + "Ada Whitlock/Lantern Road.cho"
         assertTrue(files.getValue(path).text.contains("[G]Lante[C]rn road"))
         // A song put there by hand comes here; a change there comes here; a change here goes there.
         files[root + "Paper Boats.cho"] = Stored(next++, "{title: Paper Boats}\n[Am]Folded up the [F]morning news\n", tag())
@@ -175,11 +192,12 @@ class NextcloudFolderTest {
         assertEquals(setOf("Lantern Road", "Paper Boats"), phone.songs().map { it.title }.toSet())
         phone.save(phone.all.getValue("a").copy(title = "Lantern Lane"))
         sync()
-        assertTrue(root + "Lantern Lane - Ada Whitlock.cho" in files)
+        assertTrue(root + "Ada Whitlock/Lantern Lane.cho" in files)
         assertFalse(path in files)
-        // Deleted here: gone there.
+        // Deleted here: gone there, and its artist's folder with it.
         phone.all.remove("a")
         sync()
         assertEquals(setOf(root + "Paper Boats.cho"), files.keys)
+        assertFalse(root + "Ada Whitlock/" in folders)
     }
 }
