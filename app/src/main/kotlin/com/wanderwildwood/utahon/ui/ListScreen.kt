@@ -86,7 +86,8 @@ fun ListScreen(
     val context = LocalContext.current
     val setlists = remember { Setlists.get(context) }
     val lists by setlists.all.collectAsStateWithLifecycle()
-    var tab by rememberSaveable { mutableStateOf(0) }
+    val prefs = remember { com.wanderwildwood.utahon.data.Prefs.get(context) }
+    var tab by rememberSaveable { mutableStateOf(prefs.tab) }
     var naming by remember { mutableStateOf(false) }
     val all by store.all.collectAsStateWithLifecycle()
     var searching by rememberSaveable { mutableStateOf(false) }
@@ -121,6 +122,7 @@ fun ListScreen(
                 selected = tab,
                 onSelect = {
                     tab = it
+                    prefs.tab = it
                     searching = false
                     query = ""
                 },

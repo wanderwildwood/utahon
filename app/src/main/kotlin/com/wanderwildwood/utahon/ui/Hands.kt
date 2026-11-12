@@ -6,7 +6,7 @@ package com.wanderwildwood.utahon.ui
  * song is open.
  */
 object Hands {
-    /** Moves the open sheet on (true) or back (false) half a page. */
+    /** Moves the open sheet on (true) or back (false) one step. */
     @Volatile
     var onTurn: ((Boolean) -> Unit)? = null
 

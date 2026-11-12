@@ -70,10 +70,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The auto scroll's speeds, 1 to 9, as the seconds it waits between half-page steps. The reader
- * sees only the number: a speed is felt, not counted.
+ * The auto scroll's speeds, 1 to 9, as the seconds it waits between steps of a third of a page.
+ * The reader sees only the number: a speed is felt, not counted. Even the slowest moves twice a
+ * minute: a sheet that sat still for a whole minute at speed 1 looked like one that was not
+ * scrolling at all.
  */
-internal val SPEED_SECONDS = listOf(60, 45, 35, 27, 21, 16, 12, 9, 6)
+internal val SPEED_SECONDS = listOf(30, 24, 19, 15, 12, 9, 7, 5, 3)
 const val SPEED_USUAL = 5
 
 /** The speed whose wait is nearest to [seconds]. */
@@ -85,8 +87,8 @@ private val SHEET_MARGINS = 40.dp + 20.dp + 4.dp
 /**
  * One song, read top to bottom: what it is, the key it is set in (and a way to move it), then
  * the sheet. A chord pressed shows where the fingers go. The bar at the foot starts the auto
- * scroll, which moves the sheet on half a page at a time, and lists the song's chords. A pedal's
- * keys move the sheet the same half page, and the sheet turns sideways with the phone. Opened
+ * scroll, which moves the sheet on a third of a page at a time, and lists the song's chords. A
+ * pedal's keys move the sheet the same step, and the sheet turns sideways with the phone. Opened
  * from a setlist ([place]), the sheet ends with the way on to the next song.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -124,8 +126,6 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
     fun shown(c: Chord) = c.transposed(song.transpose, flats)
 
     val sideways = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
-    // Whether the sheet's list shows the row cut at its foot (see the list below).
-    val cut by androidx.compose.runtime.rememberUpdatedState(sideways)
     var chord by remember { mutableStateOf<Chord?>(null) }
     var listing by remember { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
@@ -137,7 +137,7 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
     val state = remember(id) { LazyListState() }
 
     DisposableEffect(state) {
-        Hands.onTurn = { forward -> scope.launch { if (forward) state.stepOn(tailOf(cut)) else state.stepBack(tailOf(cut)) } }
+        Hands.onTurn = { forward -> scope.launch { if (forward) state.stepOn() else state.stepBack() } }
         onDispose { Hands.onTurn = null }
     }
     DisposableEffect(turn) {
@@ -158,7 +158,7 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
     LaunchedEffect(running, pace) {
         while (running) {
             delay(pace * 1000L)
-            if (!state.stepOn(tailOf(cut))) running = false
+            if (!state.stepOn()) running = false
         }
     }
 
@@ -207,7 +207,7 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
                     } else {
                         HouseButton(stringResource(R.string.scroll_start), {
                             // A song whose length is known is spread over it: so many steps, so many seconds each.
-                            if (song.speed == 0 && song.length > 0) worked = speedFor(song.length / (state.stepsLeft(tailOf(cut)) + 1))
+                            if (song.speed == 0 && song.length > 0) worked = speedFor(song.length / (state.stepsLeft() + 1))
                             running = true
                         }, Modifier.weight(1f))
                         if (chords.isNotEmpty()) HouseButton(stringResource(R.string.chords_button), { listing = true }, Modifier.weight(1f))
@@ -226,10 +226,10 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
                 state = state,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(start = 20.dp, end = 4.dp),
-                // Sideways the page is short, and a system of tablature that does not fit whole would
-                // leave most of it blank: there the row the foot cuts is drawn, and the next page
-                // opens on it whole.
-                showCutRow = sideways,
+                // The row the foot cuts is drawn, and the next page opens on it whole (house rule,
+                // 7 Nov 2026: the cut row rather than a gap at the bottom). A system of tablature
+                // that did not fit whole used to leave half a page blank before it.
+                showCutRow = true,
             ) {
                 if (sideways) {
                     // Sideways the page is short and is turned that way to play from: the song says
@@ -269,7 +269,8 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
                 if (chords.isNotEmpty()) {
                     item(key = "key") {
                         Mover(
-                            label = Words.moved(context, song.transpose),
+                            // With the song's key known, the key it is now in is said beside how far it moved.
+                            label = Words.moved(context, song.transpose, Chord.parse(song.key)?.transposed(song.transpose, flats)?.name),
                             onDown = { store.set(id) { it.copy(transpose = wrap(it.transpose - 1)) } },
                             onUp = { store.set(id) { it.copy(transpose = wrap(it.transpose + 1)) } },
                         )
@@ -322,51 +323,51 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
     }
 }
 
-/** How many items at the list's end are not rows: its blank tail, which a list that shows the cut row does not have. */
-private fun tailOf(cut: Boolean): Int = if (cut) 0 else 1
-
 /** Twelve semitones up is the same chords again, so the count runs from eleven down to eleven up. */
 private fun wrap(semitones: Int): Int = if (semitones > 11 || semitones < -11) 0 else semitones
 
 /**
- * Moves the sheet on by half a page: the row halfway down comes to the top, so the lines being
- * played stay in view while the next ones arrive. False when the last row is already shown.
+ * Moves the sheet on by a third of a page (two rows at the least): the row a third of the way
+ * down comes to the top, so the lines being played stay in view while the next ones arrive.
+ * False when the last row is already shown.
  */
-private suspend fun LazyListState.stepOn(tail: Int): Boolean {
+private suspend fun LazyListState.stepOn(): Boolean {
     val info = layoutInfo
     val height = info.viewportSize.height - info.afterContentPadding
-    // Upright, the list's last item is its blank tail, not a row.
-    val last = info.totalItemsCount - 1 - tail
+    val last = info.totalItemsCount - 1
     val rows = info.visibleItemsInfo.filter { it.index <= last }
     if (rows.isEmpty()) return false
     val whole = rows.filter { it.offset >= 0 && it.offset + it.size <= height }
     if (whole.any { it.index == last }) return false
     val first = rows.first().index
-    val target = (whole.getOrNull(whole.size / 2)?.index ?: (first + 1)).coerceAtLeast(first + 1).coerceAtMost(last)
+    val target = (whole.getOrNull(stride(whole.size))?.index ?: (first + 1)).coerceAtLeast(first + 1).coerceAtMost(last)
     scrollToItem(target)
     return true
 }
 
+/** How many rows one step moves, of [whole] rows on the page: a third of them, two at the least, never the whole page. */
+internal fun stride(whole: Int): Int = (whole / 3).coerceAtLeast(2).coerceAtMost((whole - 1).coerceAtLeast(1))
+
 /** Moves the sheet back by about as much as [stepOn] moves it on. False at the top. */
-private suspend fun LazyListState.stepBack(tail: Int): Boolean {
+private suspend fun LazyListState.stepBack(): Boolean {
     val info = layoutInfo
     val height = info.viewportSize.height - info.afterContentPadding
-    val rows = info.visibleItemsInfo.filter { it.index <= info.totalItemsCount - 1 - tail }
+    val rows = info.visibleItemsInfo
     val first = rows.firstOrNull()?.index ?: return false
     if (first == 0) return false
     val whole = rows.count { it.offset >= 0 && it.offset + it.size <= height }
-    scrollToItem((first - (whole / 2).coerceAtLeast(1)).coerceAtLeast(0))
+    scrollToItem((first - stride(whole)).coerceAtLeast(0))
     return true
 }
 
 /** About how many steps of [stepOn] are left before the last row is shown. */
-private fun LazyListState.stepsLeft(tail: Int): Int {
+private fun LazyListState.stepsLeft(): Int {
     val info = layoutInfo
     val height = info.viewportSize.height - info.afterContentPadding
-    val last = info.totalItemsCount - 1 - tail
+    val last = info.totalItemsCount - 1
     val whole = info.visibleItemsInfo.filter { it.index <= last && it.offset >= 0 && it.offset + it.size <= height }
     val shown = whole.lastOrNull()?.index ?: return 0
-    val each = (whole.size / 2).coerceAtLeast(1)
+    val each = stride(whole.size)
     return ((last - shown) + each - 1) / each
 }
 
@@ -396,14 +397,15 @@ private fun Mover(label: String, onDown: () -> Unit, onUp: () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChordRow(line: SheetLine.Chords, style: TextStyle, shown: (Chord) -> Chord, onChord: (Chord) -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.padding(vertical = 2.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
         for (mark in line.marks) {
             when (mark) {
                 is Mark.Of -> {
                     val c = shown(mark.chord)
-                    TextMMD(text = c.name, style = style, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onChord(c) })
+                    // A chord alone on its line is a small thing to press: its target reaches a little above and below it.
+                    TextMMD(text = c.name, style = style, fontWeight = FontWeight.Bold, modifier = Modifier.clickable { onChord(c) }.padding(vertical = 5.dp))
                 }
-                is Mark.Word -> TextMMD(text = mark.text, style = style)
+                is Mark.Word -> TextMMD(text = mark.text, style = style, modifier = Modifier.padding(vertical = 5.dp))
             }
         }
     }

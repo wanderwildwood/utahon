@@ -29,6 +29,11 @@ class Prefs private constructor(context: Context) {
         _turn.value = on
     }
 
+    /** The tab the list was last on (songs, artists, setlists), so it opens where it was left. */
+    var tab: Int
+        get() = prefs.getInt("tab", 0).coerceIn(0, 2)
+        set(value) = prefs.edit().putInt("tab", value.coerceIn(0, 2)).apply()
+
     fun setInstrument(i: Instrument) {
         prefs.edit().putString("instrument", i.id).apply()
         _instrument.value = i

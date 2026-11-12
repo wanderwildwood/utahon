@@ -36,12 +36,12 @@ design system. It installs on any device with Android 11 or later.
 - **Chords in this song** lists every chord the song uses, with its box.
 - **Transpose.** The − and + under the title move every chord a semitone, the ones named in a
   sentence ("Repeat C and G") with the rest, and the song stays where you left it. Flats or sharps are chosen to suit the key it lands in.
-- **Auto scroll** moves the sheet on half a page at a time, so the lines being played stay in
+- **Auto scroll** moves the sheet on a third of a page at a time, so the lines being played stay in
   view while the next arrive. The − and + set its speed, 1 to 9, and each song remembers its
   own; give a song its length and it picks the speed that ends with the song. Nothing glides:
   the panel repaints once per step.
 - **A pedal turns the page.** A Bluetooth page-turn pedal is a keyboard with two keys; Page
-  Down, Page Up, the arrows and the space bar move an open sheet the same half page.
+  Down, Page Up, the arrows and the space bar move an open sheet the same step.
 - **Sideways for wide tablature.** Turn the phone and an open song turns with it (a setting);
   the top bar gives its room to the sheet until the phone is upright again.
 - **A folder for each artist.** The Artists tab keeps the songs by who they are by, with no

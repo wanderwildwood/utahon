@@ -76,6 +76,9 @@
         <item quantity="other">Down %1$d semitones</item>
     </plurals>
 
+    <!-- %1$s is how far the chords were moved ("Up 2 semitones"), %2$s the key the song is now in -->
+    <string name="key_moved_to">%1$s · Key %2$s</string>
+
     <string name="scroll_start">Auto scroll</string>
     <string name="scroll_stop">Stop</string>
     <!-- How fast the auto scroll goes, 1 (slowest) to 9 -->

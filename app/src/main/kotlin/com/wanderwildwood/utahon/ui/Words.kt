@@ -22,10 +22,13 @@ object Words {
     fun showsTuning(song: Song): Boolean = song.tuning.isNotBlank() && song.tuning != STANDARD
 
     /** How far the chords have been moved from the way the sheet was written. */
-    fun moved(context: Context, semitones: Int): String = when {
-        semitones == 0 -> context.getString(R.string.key_as_written)
-        semitones > 0 -> context.resources.getQuantityString(R.plurals.key_up, semitones, semitones)
-        else -> context.resources.getQuantityString(R.plurals.key_down, -semitones, -semitones)
+    fun moved(context: Context, semitones: Int, key: String? = null): String {
+        val how = when {
+            semitones == 0 -> return context.getString(R.string.key_as_written)
+            semitones > 0 -> context.resources.getQuantityString(R.plurals.key_up, semitones, semitones)
+            else -> context.resources.getQuantityString(R.plurals.key_down, -semitones, -semitones)
+        }
+        return if (key.isNullOrBlank()) how else context.getString(R.string.key_moved_to, how, key)
     }
 
     /** A song in one line: its title, and who it is by. */

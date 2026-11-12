@@ -25,7 +25,10 @@ class SetlistTest {
     }
 
     @Test fun picksTheSpeedNearestAWait() {
-        assertEquals(5, com.wanderwildwood.utahon.ui.speedFor(20))
+        assertEquals(5, com.wanderwildwood.utahon.ui.speedFor(12))
+        assertEquals(3, com.wanderwildwood.utahon.ui.speedFor(20))
+        // A step is a third of the page, two rows at the least, never all of it.
+        assertEquals(listOf(1, 1, 2, 2, 2, 3, 4), listOf(1, 2, 3, 5, 7, 9, 12).map { com.wanderwildwood.utahon.ui.stride(it) })
         assertEquals(1, com.wanderwildwood.utahon.ui.speedFor(500))
         assertEquals(9, com.wanderwildwood.utahon.ui.speedFor(2))
         assertEquals(9, com.wanderwildwood.utahon.ui.SPEED_SECONDS.size)
