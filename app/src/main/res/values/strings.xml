@@ -143,8 +143,8 @@
     <string name="field_text">Chords and words, or tab</string>
     <string name="field_text_note">Put chords on a line of their own, over the words they go with. A line in square brackets, such as [Chorus], names a part. A ChordPro sheet can be pasted as it is.</string>
     <!-- Under the sheet box in the editor, when a line runs past its edge: move the box toward the lines' start or end -->
-    <string name="edit_left">To the start of the lines</string>
-    <string name="edit_right">Further along the lines</string>
+    <string name="edit_left">Left</string>
+    <string name="edit_right">Right</string>
     <string name="field_capo">Capo on fret</string>
     <string name="field_tuning">Tuning</string>
     <string name="field_tuning_hint" translatable="false">D A D G B E</string>
