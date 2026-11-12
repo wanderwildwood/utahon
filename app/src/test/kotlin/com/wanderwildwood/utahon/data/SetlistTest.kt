@@ -34,6 +34,16 @@ class SetlistTest {
         assertEquals(9, com.wanderwildwood.utahon.ui.SPEED_SECONDS.size)
     }
 
+    @Test fun aLineWaitsItsShareOfTheThird() {
+        // 12 s for a third of a 600 px page: a 50 px line gets a quarter of that, a row a third of the page tall all of it.
+        assertEquals(3000L, com.wanderwildwood.utahon.ui.lineWait(12, 50, 600))
+        assertEquals(12000L, com.wanderwildwood.utahon.ui.lineWait(12, 200, 600))
+        // A head taller than that waits no longer than one step did; a sliver still waits long enough to be seen.
+        assertEquals(12000L, com.wanderwildwood.utahon.ui.lineWait(12, 500, 600))
+        assertEquals(400L, com.wanderwildwood.utahon.ui.lineWait(3, 10, 600))
+        assertEquals(5000L, com.wanderwildwood.utahon.ui.lineWait(5, 40, 0))
+    }
+
     @Test fun readsALengthAsItIsTyped() {
         assertEquals(220, lengthFrom("3:40"))
         assertEquals(95, lengthFrom("95"))

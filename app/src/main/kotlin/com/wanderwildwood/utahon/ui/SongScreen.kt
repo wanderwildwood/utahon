@@ -73,10 +73,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The auto scroll's speeds, 1 to 9, as the seconds it waits between steps of a third of a page.
- * The reader sees only the number: a speed is felt, not counted. Even the slowest moves twice a
- * minute: a sheet that sat still for a whole minute at speed 1 looked like one that was not
- * scrolling at all.
+ * The auto scroll's speeds, 1 to 9, as the seconds it takes over a third of a page. It moves a
+ * line at a time ([lineWait]), so the third of a page is its pace and not its step. The reader
+ * sees only the number: a speed is felt, not counted. Even the slowest covers two thirds of a
+ * page a minute: a sheet that sat still for a whole minute at speed 1 looked like one that was
+ * not scrolling at all.
  */
 internal val SPEED_SECONDS = listOf(30, 24, 19, 15, 12, 9, 7, 5, 3)
 const val SPEED_USUAL = 5
@@ -84,14 +85,29 @@ const val SPEED_USUAL = 5
 /** The speed whose wait is nearest to [seconds]. */
 internal fun speedFor(seconds: Int): Int = SPEED_SECONDS.indices.minBy { kotlin.math.abs(SPEED_SECONDS[it] - seconds) } + 1
 
+/** The shortest the auto scroll leaves a line at the top: the screen needs that long to settle. */
+private const val LINE_WAIT_LEAST = 400L
+
+/**
+ * How long, in milliseconds, the auto scroll leaves a row of [row] pixels at the top of a page of
+ * [page] pixels before moving past it, at [pace] seconds for a third of the page: the row's share
+ * of that time, so a tall row (a system of tablature, the song's head) waits longer than a line
+ * of words and the sheet moves down the page at one rate. Never longer than the whole [pace].
+ */
+internal fun lineWait(pace: Int, row: Int, page: Int): Long {
+    val whole = pace * 1000L
+    if (page <= 0) return whole
+    return (whole * row * 3 / page).coerceIn(LINE_WAIT_LEAST.coerceAtMost(whole), whole)
+}
+
 /** How much of the screen's width the scrollbar and the sheet's own margins take. */
 private val SHEET_MARGINS = 40.dp + 20.dp + 4.dp
 
 /**
  * One song, read top to bottom: what it is, the key it is set in (and a way to move it), then
  * the sheet. A chord pressed shows where the fingers go. The bar at the foot starts the auto
- * scroll, which moves the sheet on a third of a page at a time, and lists the song's chords. A
- * pedal's keys move the sheet the same step, and the sheet turns sideways with the phone. Opened
+ * scroll, which moves the sheet on a line at a time, and lists the song's chords. A pedal's keys
+ * move the sheet a third of a page, and the sheet turns sideways with the phone. Opened
  * from a setlist ([place]), the sheet ends with the way on to the next song.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -170,8 +186,8 @@ fun SongScreen(store: Store, id: String, place: Place?, onBack: () -> Unit, onEd
 
     LaunchedEffect(running, pace) {
         while (running) {
-            delay(pace * 1000L)
-            if (!state.stepOn()) running = false
+            delay(state.lineWait(pace))
+            if (!state.lineOn()) running = false
         }
     }
 
@@ -359,6 +375,28 @@ private suspend fun LazyListState.stepOn(): Boolean {
     return true
 }
 
+/**
+ * Moves the sheet on by one row, the auto scroll's step: small enough to follow by eye, and the
+ * top of the page is still always the top of a line. False when the last row is already shown.
+ */
+private suspend fun LazyListState.lineOn(): Boolean {
+    val info = layoutInfo
+    val height = info.viewportSize.height - info.afterContentPadding
+    val last = info.totalItemsCount - 1
+    val rows = info.visibleItemsInfo
+    if (rows.isEmpty()) return false
+    if (rows.any { it.index == last && it.offset + it.size <= height }) return false
+    scrollToItem((rows.first().index + 1).coerceAtMost(last))
+    return true
+}
+
+/** How long the auto scroll leaves the row now at the top there; see the function it calls. */
+private fun LazyListState.lineWait(pace: Int): Long {
+    val info = layoutInfo
+    val row = info.visibleItemsInfo.firstOrNull() ?: return pace * 1000L
+    return lineWait(pace, row.size, info.viewportSize.height - info.afterContentPadding)
+}
+
 /** How many rows one step moves, of [whole] rows on the page: a third of them, two at the least, never the whole page. */
 internal fun stride(whole: Int): Int = (whole / 3).coerceAtLeast(2).coerceAtMost((whole - 1).coerceAtLeast(1))
 
@@ -374,7 +412,7 @@ private suspend fun LazyListState.stepBack(): Boolean {
     return true
 }
 
-/** About how many steps of [stepOn] are left before the last row is shown. */
+/** About how many steps of [stepOn] (thirds of a page, the auto scroll's measure of pace) are left before the last row is shown. */
 private fun LazyListState.stepsLeft(): Int {
     val info = layoutInfo
     val height = info.viewportSize.height - info.afterContentPadding
