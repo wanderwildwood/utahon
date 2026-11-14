@@ -103,6 +103,9 @@ fun SettingsScreen(store: Store, onBack: () -> Unit, onAbout: () -> Unit, onOpen
             item(key = "turn") {
                 SwitchRow(stringResource(R.string.settings_turn), turn, onChange = { prefs.setTurn(it) })
             }
+            item(key = "dark") {
+                SwitchRow(stringResource(R.string.settings_dark), DarkMode.on, note = stringResource(R.string.settings_dark_note), onChange = { DarkMode.set(context, it) })
+            }
             item(key = "nextcloud") {
                 val a = account
                 SettingRow(
