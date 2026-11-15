@@ -74,6 +74,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 /**
  * The auto scroll's speeds, 1 to 9, as the seconds it takes over a third of a page. It moves a
@@ -766,7 +768,16 @@ fun SetlistPicker(setlists: Setlists, songId: String, onDismiss: () -> Unit) {
         TextMMD(text = stringResource(R.string.setlist_add_to), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(8.dp))
         if (naming) {
-            Field(stringResource(R.string.setlist_name), name, { name = it })
+            // The name is what this is for: the field takes the focus, asked from inside the dialog a
+            // frame after it is drawn, and the keyboard comes up.
+            val nameField = remember { FocusRequester() }
+            val keyboardNow = LocalSoftwareKeyboardController.current
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                runCatching { nameField.requestFocus() }
+                keyboardNow?.show()
+            }
+            Field(stringResource(R.string.setlist_name), name, { name = it }, modifier = Modifier.focusRequester(nameField))
             Spacer(Modifier.height(8.dp))
             DialogButtons(
                 cancel = stringResource(R.string.cancel),

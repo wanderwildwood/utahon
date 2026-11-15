@@ -267,8 +267,17 @@ fun ListScreen(
         var name by remember { mutableStateOf("") }
         EInkDialog(onDismiss = { naming = false }) {
             TextMMD(text = stringResource(R.string.setlist_new), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            // The name is what this is for: the field takes the focus, asked from inside the dialog a
+            // frame after it is drawn, and the keyboard comes up.
+            val nameField = remember { FocusRequester() }
+            val keyboardNow = LocalSoftwareKeyboardController.current
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                runCatching { nameField.requestFocus() }
+                keyboardNow?.show()
+            }
             Spacer(Modifier.height(8.dp))
-            Field(stringResource(R.string.setlist_name), name, { name = it })
+            Field(stringResource(R.string.setlist_name), name, { name = it }, modifier = Modifier.focusRequester(nameField))
             Spacer(Modifier.height(8.dp))
             DialogButtons(
                 cancel = stringResource(R.string.cancel),

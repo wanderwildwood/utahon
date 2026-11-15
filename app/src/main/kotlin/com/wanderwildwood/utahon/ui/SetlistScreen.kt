@@ -36,6 +36,10 @@ import com.wanderwildwood.utahon.R
 import com.wanderwildwood.utahon.data.Place
 import com.wanderwildwood.utahon.data.Setlists
 import com.wanderwildwood.utahon.data.Store
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 
 /**
  * One setlist: its songs in the order they are played. A song pressed opens with the way on to
@@ -173,8 +177,17 @@ fun SetlistScreen(store: Store, id: String, onBack: () -> Unit, onOpen: (String,
         var name by remember { mutableStateOf(list.name) }
         EInkDialog(onDismiss = { renaming = false }) {
             TextMMD(text = stringResource(R.string.setlist_rename), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            // The name is what this is for: the field takes the focus, asked from inside the dialog a
+            // frame after it is drawn, and the keyboard comes up.
+            val nameField = remember { FocusRequester() }
+            val keyboardNow = LocalSoftwareKeyboardController.current
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                runCatching { nameField.requestFocus() }
+                keyboardNow?.show()
+            }
             Spacer(Modifier.height(8.dp))
-            Field(stringResource(R.string.setlist_name), name, { name = it })
+            Field(stringResource(R.string.setlist_name), name, { name = it }, modifier = Modifier.focusRequester(nameField))
             Spacer(Modifier.height(8.dp))
             DialogButtons(
                 cancel = stringResource(R.string.cancel),
