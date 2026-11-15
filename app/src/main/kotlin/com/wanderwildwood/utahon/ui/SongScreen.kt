@@ -72,6 +72,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 
 /**
  * The auto scroll's speeds, 1 to 9, as the seconds it takes over a third of a page. It moves a
@@ -444,11 +446,13 @@ private fun LazyListState.stepsLeft(): Int {
 /** The key the sheet is shown in, with a − and a + either side to move it a semitone. */
 @Composable
 private fun Mover(label: String, onDown: () -> Unit, onUp: () -> Unit) {
+    val down = stringResource(R.string.cd_key_down)
+    val up = stringResource(R.string.cd_key_up)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 10.dp, end = 8.dp),
     ) {
-        OutlinedButtonMMD(onClick = onDown, modifier = Modifier.size(48.dp)) {
+        OutlinedButtonMMD(onClick = onDown, modifier = Modifier.size(48.dp).semantics { contentDescription = down }) {
             TextMMD(text = "−", style = MaterialTheme.typography.titleMedium)
         }
         TextMMD(
@@ -457,7 +461,7 @@ private fun Mover(label: String, onDown: () -> Unit, onUp: () -> Unit) {
             textAlign = TextAlign.Center,
             modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
         )
-        OutlinedButtonMMD(onClick = onUp, modifier = Modifier.size(48.dp)) {
+        OutlinedButtonMMD(onClick = onUp, modifier = Modifier.size(48.dp).semantics { contentDescription = up }) {
             TextMMD(text = "+", style = MaterialTheme.typography.titleMedium)
         }
     }

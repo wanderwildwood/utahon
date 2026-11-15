@@ -78,6 +78,9 @@
         <item quantity="other">Down %1$d semitones</item>
     </plurals>
 
+    <!-- What a screen reader says for the − and + either side of the key -->
+    <string name="cd_key_down">Key down a semitone</string>
+    <string name="cd_key_up">Key up a semitone</string>
     <!-- %1$s is how far the chords were moved ("Up 2 semitones"), %2$s the key the song is now in -->
     <string name="key_moved_to">%1$s · Key %2$s</string>
     <!-- On the sheet, above the first tablature, when the chords were moved and the tablature could not be -->
