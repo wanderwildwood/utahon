@@ -2,7 +2,6 @@ package com.wanderwildwood.utahon.ui
 
 import android.content.Context
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,7 +66,7 @@ fun SongbookApp(incoming: Incoming?, onTaken: () -> Unit) {
     /** A page's address: the song already saved from it, or the page read. */
     fun forLink(url: String): Screen {
         val known = store.byUrl(url) ?: return Screen.Reading(url)
-        Toast.makeText(context, context.getString(R.string.already_saved), Toast.LENGTH_SHORT).show()
+        Notice.say(context, R.string.already_saved)
         return Screen.Sheet(known.id)
     }
 
@@ -187,7 +186,7 @@ suspend fun bringIn(context: Context, store: Store, uri: Uri): String? {
         }.getOrNull()?.let { songsInFile(it, name) } ?: (emptyList<Song>() to emptyList())
     }
     if (songs.isEmpty()) {
-        Toast.makeText(context, context.getString(R.string.import_none), Toast.LENGTH_LONG).show()
+        Notice.say(context, R.string.import_none)
         return null
     }
     val before = store.all.value.map { it.id }.toSet()
@@ -195,7 +194,7 @@ suspend fun bringIn(context: Context, store: Store, uri: Uri): String? {
         Setlists.get(context).bringIn(lists)
         store.bringIn(songs)
     }
-    Toast.makeText(context, context.resources.getQuantityString(R.plurals.imported, count, count), Toast.LENGTH_SHORT).show()
+    Notice.say(context.resources.getQuantityString(R.plurals.imported, count, count))
     if (songs.size != 1) return null
     return songs[0].id.takeIf { it.isNotEmpty() && store.get(it) != null }
         ?: store.all.value.map { it.id }.firstOrNull { it !in before }

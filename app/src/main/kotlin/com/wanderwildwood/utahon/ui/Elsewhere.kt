@@ -3,7 +3,6 @@ package com.wanderwildwood.utahon.ui
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
-import android.widget.Toast
 import com.wanderwildwood.utahon.R
 
 /**
@@ -52,5 +51,5 @@ object Elsewhere {
         false
     }
 
-    fun say(context: Context, text: Int) = Toast.makeText(context, context.getString(text), Toast.LENGTH_SHORT).show()
+    fun say(context: Context, text: Int) = Notice.say(context.getString(text))
 }

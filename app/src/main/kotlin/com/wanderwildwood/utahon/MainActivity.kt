@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
             // for as long as a field has focus.
             CompositionLocalProvider(LocalCursorBlinkEnabled provides false) {
                 ThemeMMD(colorScheme = monochrome, typography = houseTypography) {
-                    ArmedScope { SongbookApp(incoming.value, onTaken = { incoming.value = null }) }
+                    ArmedScope { com.wanderwildwood.utahon.ui.NoticeFrame { SongbookApp(incoming.value, onTaken = { incoming.value = null }) } }
                 }
             }
         }

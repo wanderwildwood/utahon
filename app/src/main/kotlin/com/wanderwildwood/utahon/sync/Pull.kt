@@ -14,6 +14,3 @@ fun pulledAfter(state: Cloud.State): Pulled = when (state) {
     // Signed out while it ran, or still running another: nothing went wrong that the pull caused.
     Cloud.State.OFF, Cloud.State.IDLE, Cloud.State.SYNCING -> Pulled.UP_TO_DATE
 }
-
-/** How long the line stays after a pull, in milliseconds. */
-const val PULLED_LINE_MS = 3_000L

@@ -39,12 +39,12 @@ import com.wanderwildwood.utahon.data.Song
 import com.wanderwildwood.utahon.data.Store
 import com.wanderwildwood.utahon.importer.Reader
 import com.wanderwildwood.utahon.sync.Cloud
-import com.wanderwildwood.utahon.sync.PULLED_LINE_MS
 import com.wanderwildwood.utahon.sync.Pulled
 import com.wanderwildwood.utahon.sync.pulledAfter
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.Normalizer
 import androidx.compose.runtime.withFrameNanos
@@ -76,11 +76,16 @@ fun ListScreen(
     var pulling by remember { mutableStateOf<Job?>(null) }
     val pull: () -> Unit = {
         val run = onPull
-        if (run != null && pulling?.isActive != true) {
+        // A pull while the last one's answer is still up starts a fresh one.
+        if (run != null && pulled != Pulled.SYNCING) {
+            pulling?.cancel()
             pulling = pullScope.launch {
                 pulled = Pulled.SYNCING
                 pulled = pulledAfter(run())
-                delay(PULLED_LINE_MS)
+                // The answer stays until the next press, not for a few seconds: on this panel a
+                // line on a timer could be gone before it had been read.
+                val at = Notice.presses
+                snapshotFlow { Notice.presses }.first { it != at }
                 pulled = null
             }
         }
@@ -97,6 +102,13 @@ fun ListScreen(
     var adding by remember { mutableStateOf(false) }
     var askLink by remember { mutableStateOf(false) }
     val shown = remember(all, query, searching) { if (searching) matching(all, query) else all }
+
+    // Back from Artists or Setlists goes to Songs; only Back from Songs leaves the app. On this
+    // panel the launcher would otherwise be under the next tap.
+    androidx.activity.compose.BackHandler(enabled = tab != 0) {
+        tab = 0
+        prefs.tab = 0
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
