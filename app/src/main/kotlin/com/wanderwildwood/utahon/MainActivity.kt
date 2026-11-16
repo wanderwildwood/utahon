@@ -1,5 +1,6 @@
 package com.wanderwildwood.utahon
 
+import com.wanderwildwood.utahon.ui.DarkSelection
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -37,9 +38,9 @@ class MainActivity : ComponentActivity() {
             // A steady cursor: a blinking one is a repaint twice a second on an e-ink panel
             // for as long as a field has focus.
             CompositionLocalProvider(LocalCursorBlinkEnabled provides false) {
-                ThemeMMD(colorScheme = monochrome, typography = houseTypography) {
+                ThemeMMD(colorScheme = monochrome, typography = houseTypography) { DarkSelection {
                     ArmedScope { com.wanderwildwood.utahon.ui.NoticeFrame { SongbookApp(incoming.value, onTaken = { incoming.value = null }) } }
-                }
+                } }
             }
         }
     }
