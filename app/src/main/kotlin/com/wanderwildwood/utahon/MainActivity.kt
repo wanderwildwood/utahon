@@ -93,7 +93,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * A page shared from the browser (its address, perhaps with its title), a sheet's words shared
-     * from anywhere else, or a file of songs opened from Cabinet or shared from another app.
+     * from anywhere else, or a text file (a ChordPro sheet) shared from another app.
      */
     private fun incomingFrom(intent: Intent?): Incoming? {
         intent ?: return null
