@@ -22,6 +22,8 @@ object Elsewhere {
 
     /** The page a song came from, in the browser. */
     fun page(context: Context, url: String) {
+        // Only a web page: an address kept with a song may have come from a file or a page.
+        if (!url.trim().startsWith("https://", ignoreCase = true)) return
         openLink(context, url, context.getString(R.string.about_no_browser_address, url.removePrefix("https://")))
     }
 

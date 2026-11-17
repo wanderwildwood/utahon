@@ -36,6 +36,13 @@ class SongPageTest {
         return "<html><head><title>LANTERN ROAD CHORDS by Ada Whitlock</title></head><body><div class=\"js-store\" data-content=\"$attr\"></div></body></html>"
     }
 
+    @Test fun aPageCannotPointItsSongAtAnotherSite() {
+        assertEquals("https://tabs.example.com/tab/1", SongPage.sameSite("https://tabs.example.com/tab/1", "https://tabs.example.com/x"))
+        assertEquals("https://tabs.example.com/x", SongPage.sameSite("https://elsewhere.example.org/tab/1", "https://tabs.example.com/x"))
+        assertEquals("https://tabs.example.com/x", SongPage.sameSite("market://details?id=x", "https://tabs.example.com/x"))
+        assertEquals("https://tabs.example.com/x", SongPage.sameSite("", "https://tabs.example.com/x"))
+    }
+
     @Test fun readsAPageThatCarriesItsSheetAsData() {
         val song = SongPage.stored(page(content), "https://tabs.example.com/x")!!
         assertEquals("Lantern Road", song.title)

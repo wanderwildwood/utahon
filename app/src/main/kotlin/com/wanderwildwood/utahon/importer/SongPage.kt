@@ -45,9 +45,19 @@ object SongPage {
                 capo = (meta?.optInt("capo", 0) ?: tab.optInt("capo", 0)).coerceIn(0, 24),
                 tuning = (meta?.optJSONObject("tuning")?.optString("value") ?: tab.optString("tuning")).trim(),
                 key = meta?.optString("tonality").orEmpty().ifBlank { tab.optString("tonality_name") }.trim(),
-                url = tab.optString("tab_url").ifBlank { url },
+                url = sameSite(tab.optString("tab_url"), url),
             )
         }.getOrNull()?.takeIf { it.title.isNotEmpty() || it.text.isNotEmpty() }
+    }
+
+    /**
+     * The address a page gives for its own song, when it is https on the site that was read;
+     * otherwise the address that was read. A page cannot point "the page it came from" elsewhere.
+     */
+    fun sameSite(given: String, read: String): String {
+        val g = runCatching { java.net.URI(given.trim()) }.getOrNull() ?: return read
+        val r = runCatching { java.net.URI(read) }.getOrNull() ?: return read
+        return if (g.scheme.equals("https", ignoreCase = true) && g.host != null && g.host.equals(r.host, ignoreCase = true)) given.trim() else read
     }
 
     /** A sheet as such a block of data keeps it, with its chord and tab marks taken out: plain chords over words. */
