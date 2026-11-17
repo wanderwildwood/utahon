@@ -10,8 +10,8 @@ import java.nio.charset.Charset
  * Reading a song from the address of its page: the one thing this app goes online for.
  *
  * The page is fetched once, and nothing else is: no pictures, no scripts, nothing sent but the
- * request for the page, which says plainly that it is this app. A site that answers 403 is asked
- * again the way a phone's Chrome asks. What comes back is searched for the sheet ([SongPage]);
+ * request for the page, which says plainly that it is this app. A site that refuses is not asked
+ * again under another name. What comes back is searched for the sheet ([SongPage]);
  * a page with none gives back its title, so the song can be typed or pasted in under it.
  */
 object Reader {
@@ -42,17 +42,10 @@ object Reader {
     /** [read] with the https rule switchable, so the tests can talk to a server on this machine. */
     internal fun readFrom(address: String, upgradeToHttps: Boolean): Result {
         val failed = if (upgradeToHttps && isPlain(address)) Result.Failed(NEEDS_HTTPS) else null
-        var page = try {
-            fetch(address, USER_AGENT, upgradeToHttps)
+        val page = try {
+            fetch(address, upgradeToHttps)
         } catch (_: Exception) {
             return failed ?: Result.Failed(0)
-        }
-        if (page.code == 403) {
-            page = try {
-                fetch(address, CHROME_USER_AGENT, upgradeToHttps)
-            } catch (_: Exception) {
-                page
-            }
         }
         if (page.code !in 200..299) return failed ?: Result.Failed(page.code)
         return fromHtml(page.body, page.url)
@@ -103,7 +96,7 @@ object Reader {
     private const val LIMIT = 4 * 1024 * 1024
 
     /** The page at [address], following up to five redirects, and always over https. */
-    private fun fetch(address: String, agent: String, upgradeToHttps: Boolean): Page {
+    private fun fetch(address: String, upgradeToHttps: Boolean): Page {
         fun secured(a: String) = if (upgradeToHttps) secure(a) else a.trim()
         var url = URL(secured(address))
         repeat(6) {
@@ -112,7 +105,7 @@ object Reader {
                 c.instanceFollowRedirects = false
                 c.connectTimeout = 15_000
                 c.readTimeout = 20_000
-                c.setRequestProperty("User-Agent", agent)
+                c.setRequestProperty("User-Agent", USER_AGENT)
                 c.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 c.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
                 val code = c.responseCode
@@ -145,10 +138,8 @@ object Reader {
         return runCatching { if (name.isNullOrEmpty()) Charsets.UTF_8 else Charset.forName(name) }.getOrDefault(Charsets.UTF_8)
     }
 
-    // The app's own introduction, then a borrowed one that still ends with the app's name.
+    // The app's own introduction, the only one it gives.
     internal const val USER_AGENT = "Songbook/0.1 (Android; reads one song page for its owner)"
-    internal const val CHROME_USER_AGENT =
-        "Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36 Songbook/0.1"
 
     private val ADDRESS = Regex("""https?://[^\s<>"']+""", RegexOption.IGNORE_CASE)
 
