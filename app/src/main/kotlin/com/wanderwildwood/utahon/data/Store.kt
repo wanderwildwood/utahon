@@ -20,6 +20,11 @@ class Store private constructor(context: Context) {
     private val dir = File(context.filesDir, "songs").apply { mkdirs() }
     private val collator = Collator.getInstance().apply { strength = Collator.PRIMARY }
 
+    /** Ids of song files found at start that could not be read; a sync leaves their copies there alone. */
+    @Volatile
+    var unreadable: Set<String> = emptySet()
+        private set
+
     private val _all = MutableStateFlow(load())
 
     /**
@@ -33,13 +38,17 @@ class Store private constructor(context: Context) {
     /** Every song, in order of title, then of who it is by. */
     val all: StateFlow<List<Song>> = _all
 
-    private fun load(): List<Song> =
-        sorted(
-            dir.listFiles { f -> f.isFile && f.name.endsWith(".json") }.orEmpty().mapNotNull { f ->
-                runCatching { Song.allIn(f.readText()).firstOrNull() }.getOrNull()
-                    ?.let { if (it.id.isEmpty()) it.copy(id = f.name.removeSuffix(".json")) else it }
-            },
-        )
+    private fun load(): List<Song> {
+        val bad = mutableSetOf<String>()
+        val songs = dir.listFiles { f -> f.isFile && f.name.endsWith(".json") }.orEmpty().mapNotNull { f ->
+            val song = runCatching { Song.allIn(f.readText()).firstOrNull() }.getOrNull()
+                ?.let { if (it.id.isEmpty()) it.copy(id = f.name.removeSuffix(".json")) else it }
+            if (song == null) bad += f.name.removeSuffix(".json")
+            song
+        }
+        unreadable = bad
+        return sorted(songs)
+    }
 
     private fun sorted(list: List<Song>) = list.sortedWith { a, b ->
         val t = collator.compare(a.title, b.title)
@@ -65,7 +74,7 @@ class Store private constructor(context: Context) {
      */
     @Synchronized
     fun save(song: Song): Song {
-        val now = now()
+        val now = stampAfter(song.id.takeIf { it.isNotEmpty() }?.let { get(it)?.modified })
         val kept = song.copy(
             id = song.id.ifEmpty { newId() },
             created = song.created.ifEmpty { now },
@@ -86,7 +95,7 @@ class Store private constructor(context: Context) {
         val was = get(id) ?: return
         val changed = change(was).copy(id = was.id, modified = was.modified)
         if (changed == was) return
-        val kept = changed.copy(modified = now())
+        val kept = changed.copy(modified = stampAfter(was.modified))
         write(kept)
         _all.value = _all.value.map { if (it.id == id) kept else it }
         onChanged?.invoke()
@@ -162,6 +171,16 @@ class Store private constructor(context: Context) {
 
     /** An id as a file name: letters, digits and dashes, as every id this app makes is. */
     private fun safe(id: String) = id.replace(Regex("[^A-Za-z0-9_-]"), "_").take(80)
+
+    /**
+     * Now, as a stamp that differs from [previous]: stamps are to the second, and two changes in
+     * one second would otherwise look like none to a sync.
+     */
+    private fun stampAfter(previous: String?): String {
+        val now = now()
+        if (now != previous) return now
+        return runCatching { OffsetDateTime.parse(now).plusSeconds(1).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME) }.getOrDefault(now)
+    }
 
     fun now(): String =
         OffsetDateTime.now().truncatedTo(ChronoUnit.SECONDS).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)

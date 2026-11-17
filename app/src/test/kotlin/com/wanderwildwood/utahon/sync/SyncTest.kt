@@ -93,6 +93,8 @@ class SyncTest {
 
     class Phone : Local {
         val all = linkedMapOf<String, Song>()
+        var cannotRead = emptySet<String>()
+        override fun unreadable(): Set<String> = cannotRead
         private var ids = 0
         private var clock = 0
         override fun songs(): List<Song> = all.values.toList()
@@ -289,6 +291,22 @@ class SyncTest {
         cloud.files.clear()
         sync()
         assertEquals(4, phone.songs().size)
+        assertEquals(4, cloud.files.size)
+    }
+
+    @Test fun aSongThisPhoneCouldNotReadIsNotDeletedThere() {
+        phone.save(lantern())
+        sync()
+        phone.all.remove("a"); phone.cannotRead = setOf("a")
+        sync()
+        assertEquals(1, cloud.files.size)
+    }
+
+    @Test fun aPhoneWithNoneOfItsSongsDeletesNothingThere() {
+        for (i in 1..4) phone.save(Song(id = "s$i", title = "Song $i", text = "G\nla $i\n"))
+        sync()
+        phone.all.clear()
+        sync()
         assertEquals(4, cloud.files.size)
     }
 

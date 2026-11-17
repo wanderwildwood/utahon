@@ -210,6 +210,7 @@ class Cloud private constructor(context: Context) {
     /** The store as a sync sees it. */
     private class StoreSide(private val store: Store) : Local {
         override fun songs(): List<Song> = store.all.value
+        override fun unreadable(): Set<String> = store.unreadable
         override fun put(song: Song, expect: String?) = store.putSynced(song, expect)
         override fun remove(id: String, expect: String) = store.removeSynced(id, expect)
         override fun newId() = store.newId()

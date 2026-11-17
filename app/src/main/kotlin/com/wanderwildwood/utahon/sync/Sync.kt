@@ -3,6 +3,7 @@ package com.wanderwildwood.utahon.sync
 import com.wanderwildwood.utahon.data.Song
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 
 /**
  * What the last sync left one song as: its id on this phone, where it is in the cloud and the
@@ -41,6 +42,9 @@ data class Link(val id: String, val remote: RemoteSong, val modified: String) {
 /** The songs on this phone, as a sync sees them. [com.wanderwildwood.utahon.data.Store] is the real one. */
 interface Local {
     fun songs(): List<Song>
+
+    /** Ids of songs whose files are here but could not be read: never taken for deleted. */
+    fun unreadable(): Set<String> = emptySet()
 
     /**
      * [song] kept exactly as given, its stamps included, only if the song of its id here is
@@ -90,10 +94,13 @@ sealed interface Action {
  * swapped on the server, say), nothing is deleted here: the links are let go, and the songs are
  * matched by name or sent again.
  */
-fun plan(locals: List<Song>, links: Map<String, Link>, listing: Listing): List<Action> {
+fun plan(locals: List<Song>, links: Map<String, Link>, listing: Listing, unreadable: Set<String> = emptySet()): List<Action> {
     val here = locals.associateBy { it.id }
     val there = listing.songs
     val usable = if (links.size >= 3 && links.values.none { it.remote.fileId in there }) emptyMap() else links
+    // The same the other way: none of several linked songs here is a phone that could not read
+    // its songs, not one where they were all deleted. Nothing is deleted there for it.
+    val noneHere = links.size >= 3 && links.keys.none { it in here }
 
     val out = mutableListOf<Action>()
     val linkedIds = mutableSetOf<String>()
@@ -105,6 +112,7 @@ fun plan(locals: List<Song>, links: Map<String, Link>, listing: Listing): List<A
         if (r != null) linkedFiles += r.fileId
         val changedHere = l != null && l.modified != link.modified
         val changedThere = r != null && r.etag != link.remote.etag
+        if (l == null && r != null && !changedThere && (link.id in unreadable || noneHere)) continue
         out += when {
             l == null && r == null -> Action.Forget(link)
             r == null -> if (changedHere) Action.Send(link.id) else Action.DeleteHere(link)
@@ -159,20 +167,30 @@ class Sync(
 
     fun run() {
         val listing = remote.list()
-        val actions = plan(local.songs(), links, listing)
+        val actions = plan(local.songs(), links, listing, local.unreadable())
         // Every link not dropped by the plan's own "all gone" rule is acted on by it; the rest go.
         val acted = actions.mapNotNull { linkOf(it)?.id }.toSet()
         val listed = listing.songs.keys
         links.values.removeAll { it.id !in acted && it.remote.fileId !in listed }
         val taken = listing.places.toMutableSet()
+        // One file the server will not take is not a reason to stop the songs after it: the
+        // first such failure is said once the rest are done. Signed out or no server ends it.
+        var failed: IOException? = null
         for (a in actions) {
             try {
                 act(a, taken)
             } catch (_: Changed) {
                 // Left for the next sync.
+            } catch (e: Refused) {
+                throw e
+            } catch (e: Unreachable) {
+                throw e
+            } catch (e: IOException) {
+                if (failed == null) failed = e
             }
         }
         tidy(taken)
+        failed?.let { throw it }
     }
 
     /**
