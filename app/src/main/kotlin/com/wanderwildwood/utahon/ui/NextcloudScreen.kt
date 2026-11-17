@@ -145,16 +145,19 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                         }
                         if (waiting != null) return@WideButton
                         problem = null
+                        // The server as it was when the button was pressed: the password the
+                        // browser hands back belongs to that one, whatever the field says later.
+                        val asked = server
                         waiting = scope.launch {
                             try {
-                                val started = runCatching { withContext(Dispatchers.IO) { LoginFlow.start(server) } }.getOrNull()
+                                val started = runCatching { withContext(Dispatchers.IO) { LoginFlow.start(asked) } }.getOrNull()
                                 if (started == null) {
                                     problem = R.string.cloud_unreachable
                                     return@launch
                                 }
                                 val opened = isRealBrowserFor(context, started.loginUrl) &&
                                     runCatching {
-                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(started.loginUrl)))
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(started.loginUrl)).addCategory(Intent.CATEGORY_BROWSABLE))
                                     }.isSuccess
                                 if (!opened) {
                                     problem = R.string.cloud_no_browser
@@ -181,7 +184,7 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                                     if (got != null) {
                                         // The address typed here, not the one the server calls itself by,
                                         // which behind a proxy can be a name this phone cannot reach.
-                                        keep(got.copy(server = LoginFlow.normalise(server)))
+                                        keep(got.copy(server = LoginFlow.normalise(asked)))
                                         return@launch
                                     }
                                 }
