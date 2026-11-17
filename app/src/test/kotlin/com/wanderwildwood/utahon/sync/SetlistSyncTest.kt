@@ -30,7 +30,7 @@ class SetlistSyncTest {
     private val phone = Phone()
     private var link: ListsLink? = null
     private fun sync() { link = SetlistSync.run(cloud, phone, link, " (phone)") }
-    private fun there() = SetlistSync.fromFile(cloud.files.getValue(SetlistSync.FILE).text)
+    private fun there() = SetlistSync.fromFile(cloud.files.getValue(SetlistSync.FILE).text)!!
 
     private val friday = Setlist("f", "Friday", listOf("a", "b"))
     private val lesson = Setlist("l", "Lesson", listOf("c"))
@@ -50,6 +50,15 @@ class SetlistSyncTest {
         val otherLink = SetlistSync.run(cloud, other, null, " (phone)")
         assertEquals(listOf(friday), other.all)
         assertEquals(cloud.files.getValue(SetlistSync.FILE).etag, otherLink!!.etag)
+    }
+
+    @Test fun aFileThereThatCannotBeReadEmptiesNothingHere() {
+        phone.change(listOf(friday))
+        sync()
+        cloud.putThere(SetlistSync.FILE, "{ not json")
+        sync()
+        assertEquals(listOf(friday), phone.all)
+        assertEquals("{ not json", cloud.files.getValue(SetlistSync.FILE).text)
     }
 
     @Test fun aChangeOnOneSideReachesTheOther() {

@@ -36,7 +36,10 @@ object SetlistSync {
     fun toFile(lists: List<Setlist>): String =
         JSONObject().put("setlists", JSONArray().also { a -> lists.forEach { a.put(it.toJson()) } }).toString(1)
 
-    fun fromFile(text: String): List<Setlist> = Setlist.allIn(text)
+    /** The setlists in the server's file; null when it cannot be read as one, which is not the same as none. */
+    fun fromFile(text: String): List<Setlist>? = runCatching {
+        if (JSONObject(text.trim().removePrefix("\uFEFF")).has("setlists")) Setlist.allIn(text) else null
+    }.getOrNull()
 
     /** One sync of the setlists; the link to keep for next time (null: there is still nothing to link). */
     fun run(remote: Remote, local: LocalLists, link: ListsLink?, phoneSuffix: String): ListsLink? {
@@ -50,7 +53,8 @@ object SetlistSync {
                 return ListsLink(remote.writeOwn(FILE, toFile(mine), null), stamp)
             }
             val (text, etag) = there
-            val theirs = fromFile(text)
+            // A file there that cannot be read leaves both sides as they are.
+            val theirs = fromFile(text) ?: return link
             val changedHere = if (link == null) mine.isNotEmpty() else stamp != link.stamp
             val changedThere = link == null || etag != link.etag
             return when {

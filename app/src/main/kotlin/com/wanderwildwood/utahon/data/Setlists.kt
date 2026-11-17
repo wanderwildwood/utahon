@@ -58,8 +58,10 @@ class Setlists private constructor(context: Context) {
 
     fun get(id: String): Setlist? = _all.value.firstOrNull { it.id == id }
 
+    /** The lists as they are made from what is here now: read and written under one lock, so a sync's lists in between are not lost. */
     @Synchronized
-    private fun keep(list: List<Setlist>) {
+    private fun keep(transform: (List<Setlist>) -> List<Setlist>) {
+        val list = transform(_all.value)
         write(list)
         restamp()
         onChanged?.invoke()
@@ -91,23 +93,25 @@ class Setlists private constructor(context: Context) {
 
     fun add(name: String): Setlist {
         val made = Setlist(UUID.randomUUID().toString(), name.trim())
-        keep(_all.value + made)
+        keep { it + made }
         return made
     }
 
-    fun change(id: String, how: (Setlist) -> Setlist) = keep(_all.value.map { if (it.id == id) how(it).copy(id = id) else it })
+    fun change(id: String, how: (Setlist) -> Setlist) = keep { all -> all.map { if (it.id == id) how(it).copy(id = id) else it } }
 
-    fun delete(id: String) = keep(_all.value.filterNot { it.id == id })
+    fun delete(id: String) = keep { all -> all.filterNot { it.id == id } }
 
     /** Setlists from a saved songbook: one with the id of a setlist already here replaces it. */
     fun bringIn(lists: List<Setlist>) {
         if (lists.isEmpty()) return
-        val byId = LinkedHashMap(_all.value.associateBy { it.id })
-        for (l in lists) {
-            val kept = if (l.id.isEmpty()) l.copy(id = UUID.randomUUID().toString()) else l
-            byId[kept.id] = kept
+        keep { all ->
+            val byId = LinkedHashMap(all.associateBy { it.id })
+            for (l in lists) {
+                val kept = if (l.id.isEmpty()) l.copy(id = UUID.randomUUID().toString()) else l
+                byId[kept.id] = kept
+            }
+            byId.values.toList()
         }
-        keep(byId.values.toList())
     }
 
     companion object {
