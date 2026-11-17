@@ -99,14 +99,21 @@ class MainActivity : ComponentActivity() {
         intent ?: return null
         return when (intent.action) {
             Intent.ACTION_SEND -> {
-                IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let { return Incoming.File(it) }
+                // Only a file another app hands over (content:), never a path into this app's own storage.
+                IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let {
+                    return if (it.scheme == "content") Incoming.File(it) else null
+                }
                 val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return null
                 // Several links are a list to read through, which the app takes as text and sorts out.
                 Reader.addressIn(text)?.takeIf { Reader.isLinkShare(text) && !Reader.isLinkList(text) }?.let { Incoming.Link(it) }
                     ?: Incoming.Text(intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty(), text)
             }
             Intent.ACTION_VIEW -> intent.data?.let { uri ->
-                if (uri.scheme == "http" || uri.scheme == "https") Incoming.Link(uri.toString()) else Incoming.File(uri)
+                when (uri.scheme) {
+                    "http", "https" -> Incoming.Link(uri.toString())
+                    "content" -> Incoming.File(uri)
+                    else -> null
+                }
             }
             else -> null
         }

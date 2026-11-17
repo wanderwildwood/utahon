@@ -52,11 +52,65 @@ sealed interface Screen {
     data object Nextcloud : Screen
 }
 
+/**
+ * The screens open, kept when the window is built again (or the process let go) so a song
+ * being typed comes back with its screen: each as one line of JSON.
+ */
+internal object Screens {
+    fun encode(s: Screen): String {
+        val o = org.json.JSONObject()
+        when (s) {
+            Screen.List -> o.put("k", "list")
+            is Screen.Sheet -> {
+                o.put("k", "sheet").put("id", s.id)
+                s.place?.let { o.put("set", it.setlist).put("at", it.at) }
+            }
+            is Screen.Set -> o.put("k", "set").put("id", s.id)
+            is Screen.Artist -> o.put("k", "artist").put("name", s.name)
+            is Screen.Edit -> {
+                o.put("k", "edit").put("note", s.note)
+                s.id?.let { o.put("id", it) }
+                s.draft?.let { o.put("draft", it.toJson()) }
+            }
+            is Screen.Reading -> o.put("k", "reading").put("url", s.url)
+            Screen.Reading_Many -> o.put("k", "many")
+            Screen.Settings -> o.put("k", "settings")
+            Screen.Nextcloud -> o.put("k", "nextcloud")
+        }
+        return o.toString()
+    }
+
+    fun decode(text: String): Screen? = runCatching {
+        val o = org.json.JSONObject(text)
+        when (o.getString("k")) {
+            "list" -> Screen.List
+            "sheet" -> Screen.Sheet(o.getString("id"), if (o.has("set")) Place(o.getString("set"), o.getInt("at")) else null)
+            "set" -> Screen.Set(o.getString("id"))
+            "artist" -> Screen.Artist(o.getString("name"))
+            "edit" -> Screen.Edit(
+                if (o.has("id")) o.getString("id") else null,
+                o.optJSONObject("draft")?.let { Song.fromJson(it) },
+                o.optInt("note", 0),
+            )
+            "reading" -> Screen.Reading(o.getString("url"))
+            "many" -> Screen.Reading_Many
+            "settings" -> Screen.Settings
+            "nextcloud" -> Screen.Nextcloud
+            else -> null
+        }
+    }.getOrNull()
+
+    val saver = androidx.compose.runtime.saveable.Saver<List<Screen>, ArrayList<String>>(
+        save = { list -> ArrayList(list.map(::encode)) },
+        restore = { saved -> saved.mapNotNull(::decode).ifEmpty { listOf(Screen.List) } },
+    )
+}
+
 @Composable
 fun SongbookApp(incoming: Incoming?, onTaken: () -> Unit) {
     val context = LocalContext.current
     val store = remember { Store.get(context) }
-    var stack by remember { mutableStateOf(listOf<Screen>(Screen.List)) }
+    var stack by androidx.compose.runtime.saveable.rememberSaveable(stateSaver = Screens.saver) { mutableStateOf(listOf<Screen>(Screen.List)) }
     var about by remember { mutableStateOf(false) }
 
     fun go(s: Screen) { stack = stack + s }
@@ -174,6 +228,9 @@ fun songsInFile(text: String, fileName: String): Pair<List<Song>, List<Setlist>>
  * Songs from a file another app opened here, or the reader picked: brought in, said so, and the
  * id of the one song when there was only one, to open it.
  */
+/** Larger than any songbook of text; a file past it is said to hold no songs. */
+private const val MAX_FILE_BYTES = 16 * 1024 * 1024
+
 suspend fun bringIn(context: Context, store: Store, uri: Uri): String? {
     val (songs, lists) = withContext(Dispatchers.IO) {
         val name = runCatching {
@@ -181,8 +238,19 @@ suspend fun bringIn(context: Context, store: Store, uri: Uri): String? {
                 if (c.moveToFirst()) c.getString(0) else null
             }
         }.getOrNull().orEmpty()
+        // A songbook is text: a file far bigger than any is not read into memory at all.
         runCatching {
-            context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val bytes = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    bytes.write(buffer, 0, n)
+                    if (bytes.size() > MAX_FILE_BYTES) throw java.io.IOException("too large")
+                }
+                bytes.toString(Charsets.UTF_8.name())
+            }
         }.getOrNull()?.let { songsInFile(it, name) } ?: (emptyList<Song>() to emptyList())
     }
     if (songs.isEmpty()) {
