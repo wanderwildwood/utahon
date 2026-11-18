@@ -24,6 +24,11 @@ object SongFile {
 
     fun toFile(s: Song): String {
         val body = ChordPro.write(s.title, s.artist, s.capo, s.key, Sheet.read(s.text), 0)
+        // ChordPro cannot say everything a sheet holds; where reading the body back would not
+        // give the sheet word for word, the sheet itself rides along too, so a sync never
+        // changes it.
+        // In quotes, so spaces at either end of the sheet are kept too.
+        val whole = if (ChordPro.read(body).text != s.text) "\"" + escape(s.text) + "\"" else ""
         val own = buildString {
             fun line(name: String, value: String) { if (value.isNotEmpty()) append("{x_songbook_").append(name).append(": ").append(value).append("}\n") }
             line("id", s.id)
@@ -35,12 +40,42 @@ object SongFile {
             line("length", if (s.length != 0) s.length.toString() else "")
             line("created", s.created)
             line("modified", s.modified)
+            line("sheet", whole)
         }
         return own + body
     }
 
-    /** The song a file holds, or null when it holds neither a title nor a sheet. */
-    fun fromFile(text: String, fileName: String, folder: String = ""): Song? {
+    /** A sheet on one line: each backslash doubled, each line end written as a backslash and n. */
+    internal fun escape(text: String): String = buildString {
+        for (c in text.replace("\r\n", "\n")) {
+            when (c) {
+                '\\' -> append("\\\\")
+                '\n' -> append("\\n")
+                else -> append(c)
+            }
+        }
+    }
+
+    internal fun unescape(line: String): String = buildString {
+        var i = 0
+        while (i < line.length) {
+            val c = line[i]
+            if (c == '\\' && i + 1 < line.length) {
+                append(if (line[i + 1] == 'n') '\n' else line[i + 1])
+                i += 2
+            } else {
+                append(c)
+                i++
+            }
+        }
+    }
+
+    /**
+     * The song a file holds, or null when it holds neither a title nor a sheet. With [verbatim],
+     * a sheet this app wrote beside the body is taken word for word, as long as the body is
+     * still what that sheet makes (nobody changed the file elsewhere); otherwise the body is read.
+     */
+    fun fromFile(text: String, fileName: String, folder: String = "", verbatim: Boolean = true): Song? {
         val own = HashMap<String, String>()
         val rest = text.replace("\r\n", "\n").split('\n').filter { line ->
             val m = OWN.matchEntire(line) ?: return@filter true
@@ -50,12 +85,16 @@ object SongFile {
         val pro = ChordPro.read(rest)
         val title = pro.title.ifBlank { fileName.substringBeforeLast('.').trim() }
         if (title.isBlank() && pro.text.isBlank()) return null
+        val sheet = own["sheet"]?.takeIf { verbatim && it.length >= 2 && it.startsWith("\"") && it.endsWith("\"") }
+            ?.let { unescape(it.substring(1, it.length - 1)) }?.takeIf { whole ->
+            ChordPro.write(pro.title, pro.artist, pro.capo, pro.key, Sheet.read(whole), 0).trimEnd() == rest.trimEnd()
+        }
         return Song(
             id = own["id"].orEmpty(),
             title = title,
             // A file with no artist written in it is by whoever's folder it was put in.
             artist = pro.artist.ifBlank { folder.trim() },
-            text = pro.text,
+            text = sheet ?: pro.text,
             kind = own["kind"].orEmpty(),
             capo = pro.capo,
             tuning = own["tuning"].orEmpty(),
@@ -75,7 +114,7 @@ object SongFile {
      * file, since writing one out evens its spacing.
      */
     fun same(a: Song, b: Song): Boolean {
-        fun canon(s: Song) = fromFile(toFile(s.copy(id = "", created = "", modified = "")), "")
+        fun canon(s: Song) = fromFile(toFile(s.copy(id = "", created = "", modified = "")), "", verbatim = false)
         return canon(a) == canon(b)
     }
 

@@ -22,6 +22,21 @@ class SongFileTest {
         assertEquals(song, back)
     }
 
+    @Test fun aSheetComesBackWordForWordEvenWhereChordProWouldChangeIt() {
+        val odd = song.copy(text = "   spoken, not sung  \n\n\n\nG    C\nwords with a \\ and {braces}\n\n")
+        val back = SongFile.fromFile(SongFile.toFile(odd), "x.cho")!!
+        assertEquals(odd.text, back.text)
+    }
+
+    @Test fun aSheetChangedElsewhereIsReadFromTheBody() {
+        val odd = song.copy(text = "   spoken, not sung  \n\n\n\nG    C\nwords\n")
+        val file = SongFile.toFile(odd)
+        val body = file.indexOf("{title:")
+        val edited = file.substring(0, body) + file.substring(body).replace("words", "other words")
+        val back = SongFile.fromFile(edited, "x.cho")!!
+        assertTrue(back.text, back.text.contains("other words"))
+    }
+
     @Test fun aFileWrittenTwiceIsTheSameFile() {
         val once = SongFile.toFile(song)
         assertEquals(once, SongFile.toFile(SongFile.fromFile(once, "x.cho")!!))
