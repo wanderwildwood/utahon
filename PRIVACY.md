@@ -27,7 +27,9 @@ you have moved each one's chords and its scroll speed) and your setlists, and it
 chord boxes are drawn for, the size of the sheet, whether the screen stays on, whether an open
 song turns with the phone, whether dark mode is on, and which tab was open last; and, while you are signed in, the Nextcloud address, your login
 name, the folder your songs go in, the app password (sealed with a key held in the phone's keystore, not kept as plain text)
-and a note of what was last synced. None of it is
+and a note of what was last synced; and, while a sign-in through the browser is waited on, the
+addresses and token the server gave for it and the address you typed (sealed the same way), for at
+most twenty minutes. None of it is
 backed up by the app, and uninstalling it removes all of it. Settings can save every song to a
 file you choose, and bring songs in from one.
 
