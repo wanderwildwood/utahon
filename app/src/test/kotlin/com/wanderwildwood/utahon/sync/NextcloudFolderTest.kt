@@ -31,6 +31,13 @@ class NextcloudFolderTest {
     private var next = 100
     private var gzipMarks = true
     private fun tag() = "\"e${next++}\""
+    /** Run as a folder's DELETE arrives, before it is answered: another phone's write in between. */
+    private var beforeFolderDelete: (() -> Unit)? = null
+
+    /** A folder's etag, as Nextcloud's: it changes whenever anything in it does. */
+    private fun folderTag(path: String) =
+        "\"d" + (files.filterKeys { it.startsWith(path) }.map { it.key + it.value.etag } +
+            folders.filter { it != path && it.startsWith(path) }).hashCode().toUInt() + "\""
 
     private fun answer(code: Int, body: String = "", headers: Map<String, String> = emptyMap()): MockResponse {
         val r = MockResponse().setResponseCode(code)
@@ -53,9 +60,9 @@ class NextcloudFolderTest {
             "PROPFIND" -> {
                 val out = StringBuilder("<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\" xmlns:oc=\"http://owncloud.org/ns\">")
                 if (path in folders) {
-                    out.append(entry(path, "\"dir\"", 1, true))
+                    out.append(entry(path, folderTag(path), 1, true))
                     if (x.getHeader("Depth") == "1") {
-                        folders.filter { it != path && it.startsWith(path) && !it.removePrefix(path).trimEnd('/').contains('/') }.forEach { out.append(entry(it, "\"dir\"", 2, true)) }
+                        folders.filter { it != path && it.startsWith(path) && !it.removePrefix(path).trimEnd('/').contains('/') }.forEach { out.append(entry(it, folderTag(it), 2, true)) }
                         files.filterKeys { it.startsWith(path) && !it.removePrefix(path).contains('/') }.forEach { (p, f) -> out.append(entry(p, f.etag, f.id, false)) }
                     }
                 } else {
@@ -92,9 +99,12 @@ class NextcloudFolderTest {
                 answer(201)
             }
             "DELETE" -> {
+                // A folder goes with everything in it, as WebDAV has it.
                 if (path in folders) {
-                    if (files.keys.any { it.startsWith(path) }) return answer(409)
-                    folders.remove(path)
+                    beforeFolderDelete?.invoke()
+                    if (ifMatch != null && folderTag(path) != ifMatch) return answer(412)
+                    files.keys.removeAll { it.startsWith(path) }
+                    folders.removeAll { it.startsWith(path) }
                     return answer(204)
                 }
                 val f = files[path] ?: return answer(404)
@@ -156,6 +166,23 @@ class NextcloudFolderTest {
         f.delete(moved)
         assertEquals(setOf("Other"), f.list().places)
         assertFalse(root + "Tomas & Co/" in folders)
+    }
+
+    @Test fun anEmptiedFolderKeepsASongPutInItFromAnotherPhoneJustBefore() {
+        val f = folder()
+        f.list()
+        val made = f.create("Ada Whitlock", "Lantern Road", "one")
+        val theirs = root + "Ada Whitlock/Harbor Light.cho"
+        beforeFolderDelete = { files[theirs] = Stored(next++, "theirs", tag()) }
+        f.delete(made)
+        assertTrue(root + "Ada Whitlock/" in folders)
+        assertEquals("theirs", files.getValue(theirs).text)
+        assertEquals(setOf("Ada Whitlock/Harbor Light"), f.list().places)
+
+        // Nothing put in it on the way: the emptied folder goes.
+        beforeFolderDelete = null
+        f.delete(f.list().songs.values.single())
+        assertFalse(root + "Ada Whitlock/" in folders)
     }
 
     @Test fun onlySongFilesAreListed() {
