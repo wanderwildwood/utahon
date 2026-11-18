@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import com.wanderwildwood.utahon.R
+import com.wanderwildwood.utahon.importer.Reader
 
 /**
  * The other apps a song reaches: the browser for the page it came from, Tuner to tune by, and
@@ -20,11 +21,18 @@ object Elsewhere {
         if (!open(context, Intent.createChooser(send, null))) say(context, R.string.nothing_takes_text)
     }
 
+    /**
+     * The address a song's page is opened at: over https, as every page this app reads is (a
+     * plain http one is asked for over https); null for anything that is not a web page, since
+     * an address kept with a song may have come from a file.
+     */
+    fun pageAddress(url: String): String? =
+        Reader.secure(url).takeIf { it.startsWith("https://", ignoreCase = true) && it.length > "https://".length }
+
     /** The page a song came from, in the browser. */
     fun page(context: Context, url: String) {
-        // Only a web page: an address kept with a song may have come from a file or a page.
-        if (!url.trim().startsWith("https://", ignoreCase = true)) return
-        openLink(context, url, context.getString(R.string.about_no_browser_address, url.removePrefix("https://")))
+        val address = pageAddress(url) ?: return
+        openLink(context, address, context.getString(R.string.about_no_browser_address, address.substring("https://".length)))
     }
 
     /** Tuner (onsa), which also keeps the beat. */

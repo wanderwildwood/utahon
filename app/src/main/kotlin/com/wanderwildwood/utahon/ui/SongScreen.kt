@@ -727,7 +727,7 @@ private fun MoreDialog(store: Store, setlists: Setlists, song: Song, lines: List
                 }
                 WideButton(stringResource(R.string.save_file)) { save.launch(fileName(song.title) + ".cho") }
                 WideButton(stringResource(R.string.setlist_add_to)) { picking = true }
-                if (song.url.isNotBlank()) {
+                if (Elsewhere.pageAddress(song.url) != null) {
                     WideButton(stringResource(R.string.open_page)) {
                         Elsewhere.page(context, song.url)
                         onDismiss()
