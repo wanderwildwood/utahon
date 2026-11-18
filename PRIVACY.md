@@ -3,7 +3,7 @@
 Songbook collects nothing about you and sends nothing anywhere of its own accord.
 
 It goes online for two things. One is to fetch a song's page whose address you shared with it or typed
-into it. That one page is fetched, saying plainly that the request is from the app Songbook; no
+into it; an address or a file shared from another app is acted on only after you say yes to it. That one page is fetched, saying plainly that the request is from the app Songbook; no
 pictures or scripts from it are fetched, and nothing about you or your songs is sent with the
 request. The site sees a request for its page from an app, and may refuse it; the app then says
 so, and the sheet can be pasted in instead. It does not try to get round the refusal. Everything

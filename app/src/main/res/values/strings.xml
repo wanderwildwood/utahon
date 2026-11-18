@@ -56,6 +56,17 @@
     <string name="no_song_on_page">That page has no chords or tab this app can read. Its name and address are below; the sheet can be typed or pasted in.</string>
     <string name="shared_draft_note">A draft made from the shared text. Give it a title, fix what is off, then press Save.</string>
     <string name="already_saved">That song is already saved.</string>
+    <!-- Asked before anything another app hands in is acted on -->
+    <string name="incoming_link">Read the song on the page at %1$s?</string>
+    <plurals name="incoming_links">
+        <item quantity="one">Read the song on the %1$d page in what was shared?</item>
+        <item quantity="other">Read the songs on the %1$d pages in what was shared?</item>
+    </plurals>
+    <string name="incoming_text">Start a new song from the words that were shared?</string>
+    <string name="incoming_file">Bring in the songs from this file? A song already here from the same songbook is replaced by the file\'s copy.</string>
+    <string name="incoming_read">Read</string>
+    <string name="incoming_start">Start</string>
+    <string name="incoming_bring_in">Bring in</string>
 
     <!-- ============================================================ -->
     <!-- A song -->

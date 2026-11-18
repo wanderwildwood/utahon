@@ -3,6 +3,14 @@ package com.wanderwildwood.utahon.ui
 import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import com.mudita.mmd.components.text.TextMMD
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,6 +32,7 @@ import com.wanderwildwood.utahon.music.ChordPro
 import com.wanderwildwood.utahon.sync.Cloud
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** What another app handed this one: a page to read, a sheet as text, or a file of songs. */
@@ -124,9 +133,17 @@ fun SongbookApp(incoming: Incoming?, onTaken: () -> Unit) {
         return Screen.Sheet(known.id)
     }
 
+    // Something handed in by another app waits for a yes: it reads pages, brings songs in and
+    // takes the place of the screen that is open, so nothing happens until it is asked for.
+    var asking by remember { mutableStateOf<Incoming?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(incoming) {
         val i = incoming ?: return@LaunchedEffect
         onTaken()
+        asking = i
+    }
+
+    suspend fun take(i: Incoming) {
         when (i) {
             is Incoming.Link -> stack = listOf(Screen.List, forLink(i.url))
             // Shared words (not just a link): a list of links is read page by page; anything else is a draft, to name and save.
@@ -139,6 +156,17 @@ fun SongbookApp(incoming: Incoming?, onTaken: () -> Unit) {
                 stack = listOf(Screen.List) + listOfNotNull(opened?.let { Screen.Sheet(it) })
             }
         }
+    }
+
+    asking?.let { i ->
+        IncomingDialog(
+            incoming = i,
+            onCancel = { asking = null },
+            onConfirm = {
+                asking = null
+                scope.launch { take(i) }
+            },
+        )
     }
 
     BackHandler(enabled = stack.size > 1) { back() }
@@ -291,3 +319,40 @@ private fun ReadingScreen(
     }
     ReadingPage(url = url, failed = failed, onRetry = { attempt++ }, onTypeIn = { onTypeIn(Song(id = "", title = "", url = url), 0) }, onBack = onBack)
 }
+
+/** The question asked before anything handed in by another app is acted on. */
+@Composable
+private fun IncomingDialog(incoming: Incoming, onCancel: () -> Unit, onConfirm: () -> Unit) {
+    val question = when (incoming) {
+        is Incoming.Link -> stringResource(
+            R.string.incoming_link,
+            runCatching { Uri.parse(incoming.url).host }.getOrNull() ?: incoming.url,
+        )
+        is Incoming.Text -> if (Reader.isLinkList(incoming.text)) {
+            val n = Reader.addressesIn(incoming.text).size
+            pluralStringResource(R.plurals.incoming_links, n, n)
+        } else {
+            stringResource(R.string.incoming_text)
+        }
+        is Incoming.File -> stringResource(R.string.incoming_file)
+    }
+    val confirm = stringResource(
+        when (incoming) {
+            is Incoming.File -> R.string.incoming_bring_in
+            is Incoming.Text -> if (Reader.isLinkList(incoming.text)) R.string.incoming_read else R.string.incoming_start
+            is Incoming.Link -> R.string.incoming_read
+        },
+    )
+    EInkDialog(onDismiss = onCancel) {
+        TextMMD(text = question, style = MaterialTheme.typography.bodyLarge)
+        Spacer(Modifier.height(16.dp))
+        DialogButtons(
+            cancel = stringResource(R.string.cancel),
+            confirm = confirm,
+            onCancel = onCancel,
+            onConfirm = onConfirm,
+            confirmOn = true,
+        )
+    }
+}
+
