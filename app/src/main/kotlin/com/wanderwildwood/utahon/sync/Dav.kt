@@ -209,12 +209,7 @@ class NextcloudFolder(
         }
     }
 
-    /**
-     * An artist's folder with nothing left in it is taken away; one with anything at all in it is
-     * left. A DELETE of a folder takes everything in it, so it goes only while the folder is as it
-     * was listed empty: its etag changes when anything is put in it, and a folder that has had a
-     * song put in it since, from another phone, is then refused (412) and stays.
-     */
+    /** An artist's folder with nothing left in it is taken away; one with anything at all in it is left. */
     private fun dropIfEmpty(folder: String) {
         if (folder.isEmpty()) return
         val left = try {
@@ -224,8 +219,7 @@ class NextcloudFolder(
         }
         val self = decodeHref(dir(folder))
         if (left.any { it.path != self }) return
-        val etag = left.firstOrNull { it.path == self }?.etag ?: return
-        runCatching { call(request(dir(folder)).delete().header("If-Match", etag).build()) { } }
+        runCatching { call(request(dir(folder)).delete().build()) { } }
     }
 
     override fun readOwn(file: String): Pair<String, String>? =
