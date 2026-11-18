@@ -11,6 +11,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,10 +28,7 @@ import com.wanderwildwood.utahon.R
 import com.wanderwildwood.utahon.sync.Account
 import com.wanderwildwood.utahon.sync.Cloud
 import com.wanderwildwood.utahon.sync.LoginFlow
-import com.wanderwildwood.utahon.sync.Refused
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
@@ -54,15 +52,16 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
     var server by remember { mutableStateOf("") }
     var user by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var waiting by remember { mutableStateOf<Job?>(null) }
+    // The sign-in itself, and the wait for the browser, are the app's (see Cloud.signing), so
+    // Back or the screen built again does not lose them; only the first ask is the screen's.
+    val signing by cloud.signing.collectAsStateWithLifecycle()
+    var starting by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<Int?>(null) }
     var newFolder by remember(folder) { mutableStateOf(folder) }
-
-    fun keep(a: Account) {
-        scope.launch {
-            problem = runCatching { cloud.signIn(a); null }.getOrElse { e ->
-                if (e is Refused) R.string.cloud_refused else R.string.cloud_unreachable
-            }
+    LaunchedEffect(signing.problem) {
+        signing.problem?.let {
+            problem = it
+            cloud.problemSaid()
         }
     }
 
@@ -118,7 +117,7 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                 }
                 item(key = "password_note") { Note(stringResource(R.string.cloud_app_password_note)) }
                 problem?.let { p -> item(key = "problem") { Note(stringResource(p)) } }
-                if (waiting != null) item(key = "waiting") { Note(stringResource(R.string.cloud_waiting)) }
+                if (starting || signing.browser) item(key = "waiting") { Note(stringResource(R.string.cloud_waiting)) }
                 item(key = "sign_in") {
                     WideButton(stringResource(R.string.cloud_sign_in), filled = true) {
                         if (server.isBlank() || user.isBlank() || password.isBlank()) {
@@ -129,8 +128,7 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                             problem = R.string.cloud_needs_https
                             return@WideButton
                         }
-                        waiting?.cancel()
-                        keep(Account(LoginFlow.normalise(server), user.trim(), password.trim()))
+                        cloud.signInLater(Account(LoginFlow.normalise(server), user.trim(), password.trim()))
                     }
                 }
                 item(key = "browser") {
@@ -143,12 +141,13 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                             problem = R.string.cloud_needs_https
                             return@WideButton
                         }
-                        if (waiting != null) return@WideButton
+                        if (starting || signing.browser) return@WideButton
                         problem = null
                         // The server as it was when the button was pressed: the password the
                         // browser hands back belongs to that one, whatever the field says later.
                         val asked = server
-                        waiting = scope.launch {
+                        starting = true
+                        scope.launch {
                             try {
                                 val started = runCatching { withContext(Dispatchers.IO) { LoginFlow.start(asked) } }.getOrNull()
                                 if (started == null) {
@@ -163,33 +162,9 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                                     problem = R.string.cloud_no_browser
                                     return@launch
                                 }
-                                // The server gives twenty minutes to finish signing in. An answer
-                                // that keeps failing is said, not waited on in silence.
-                                var failed = 0
-                                repeat(600) {
-                                    delay(2000)
-                                    val got = try {
-                                        // An answer, even "not yet", ends a run of failures.
-                                        withContext(Dispatchers.IO) { LoginFlow.poll(started) }.also { failed = 0 }
-                                    } catch (_: Refused) {
-                                        problem = R.string.cloud_refused
-                                        return@launch
-                                    } catch (_: Exception) {
-                                        if (++failed >= 15) {
-                                            problem = R.string.cloud_browser_lost
-                                            return@launch
-                                        }
-                                        null
-                                    }
-                                    if (got != null) {
-                                        // The address typed here, not the one the server calls itself by,
-                                        // which behind a proxy can be a name this phone cannot reach.
-                                        keep(got.copy(server = LoginFlow.normalise(asked)))
-                                        return@launch
-                                    }
-                                }
+                                cloud.awaitBrowser(started, asked)
                             } finally {
-                                waiting = null
+                                starting = false
                             }
                         }
                     }

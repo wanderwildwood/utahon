@@ -6,6 +6,7 @@ import com.wanderwildwood.utahon.data.Setlist
 import com.wanderwildwood.utahon.data.Setlists
 import com.wanderwildwood.utahon.data.Song
 import com.wanderwildwood.utahon.data.Store
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -17,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 
@@ -64,9 +66,21 @@ class Cloud private constructor(context: Context) {
     /** When the last sync finished, in milliseconds; 0 for never. */
     val lastSync: StateFlow<Long> = _last
 
+    /**
+     * A sign-in going on away from the screen that started it, so that Back, or the screen built
+     * again, does not lose it: [browser] while the server's page in the browser is waited on,
+     * and [problem] (a string) what ended the last one, until it has been said.
+     */
+    data class SignIn(val browser: Boolean = false, val problem: Int? = null)
+
+    private val _signing = MutableStateFlow(SignIn())
+    val signing: StateFlow<SignIn> = _signing
+    private var signingJob: Job? = null
+
     init {
         store.onChanged = { syncSoon() }
         setlists.onChanged = { syncSoon() }
+        resumeBrowser()
     }
 
     /** On opening the app: a sync, unless one was tried in the last minute. */
@@ -159,6 +173,94 @@ class Cloud private constructor(context: Context) {
         syncNow()
     }
 
+    /** [a] kept as [signIn] does, in the background; what went wrong is said through [signing]. */
+    fun signInLater(a: Account) {
+        signingJob?.cancel()
+        _signing.value = SignIn()
+        signingJob = scope.launch { _signing.value = SignIn(problem = problemSigningIn(a)) }
+    }
+
+    /**
+     * The server's page is open in the browser: the server is asked every two seconds whether
+     * the reader has finished there, for the twenty minutes it gives. What it started is kept
+     * (sealed), so a process let go while the browser is in front takes it up again.
+     */
+    fun awaitBrowser(started: LoginFlow.Started, asked: String) {
+        if (_signing.value.browser) return
+        val since = System.currentTimeMillis()
+        val kept = JSONObject().put("login", started.loginUrl).put("poll", started.pollUrl)
+            .put("token", started.token).put("asked", asked).put("since", since)
+        Secrets.seal(kept.toString())?.let { prefs.edit().putString(LOGIN, it).apply() }
+        startPolling(started, asked, since)
+    }
+
+    /** The problem in [signing] has been said. */
+    fun problemSaid() {
+        _signing.value = _signing.value.copy(problem = null)
+    }
+
+    private fun resumeBrowser() {
+        val stored = prefs.getString(LOGIN, null) ?: return
+        val o = Secrets.open(stored)?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val since = o?.optLong("since") ?: 0L
+        val asked = o?.optString("asked").orEmpty()
+        val started = o?.let {
+            runCatching { LoginFlow.Started(it.getString("login"), it.getString("poll"), it.getString("token")) }.getOrNull()
+        }
+        if (started == null || asked.isBlank() || _account.value != null || System.currentTimeMillis() - since !in 0L until LOGIN_WINDOW) {
+            prefs.edit().remove(LOGIN).apply()
+            return
+        }
+        startPolling(started, asked, since)
+    }
+
+    private fun startPolling(started: LoginFlow.Started, asked: String, since: Long) {
+        signingJob?.cancel()
+        _signing.value = SignIn(browser = true)
+        signingJob = scope.launch {
+            var problem: Int? = null
+            try {
+                problem = pollBrowser(started, asked, since)
+            } finally {
+                prefs.edit().remove(LOGIN).apply()
+                _signing.value = SignIn(problem = problem)
+            }
+        }
+    }
+
+    /** The browser's sign-in waited on; null when it went through or ran out of time, else the problem. */
+    private suspend fun pollBrowser(started: LoginFlow.Started, asked: String, since: Long): Int? {
+        // An answer that keeps failing is said, not waited on in silence.
+        var failed = 0
+        while (System.currentTimeMillis() - since < LOGIN_WINDOW) {
+            delay(2000)
+            val got = try {
+                // An answer, even "not yet", ends a run of failures.
+                LoginFlow.poll(started).also { failed = 0 }
+            } catch (_: Refused) {
+                return R.string.cloud_refused
+            } catch (_: Exception) {
+                if (++failed >= 15) return R.string.cloud_browser_lost
+                null
+            }
+            // The address typed here, not the one the server calls itself by, which behind a
+            // proxy can be a name this phone cannot reach.
+            if (got != null) return problemSigningIn(got.copy(server = LoginFlow.normalise(asked)))
+        }
+        return null
+    }
+
+    private suspend fun problemSigningIn(a: Account): Int? = try {
+        signIn(a)
+        null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Refused) {
+        R.string.cloud_refused
+    } catch (_: Exception) {
+        R.string.cloud_unreachable
+    }
+
     /** Forgets the account and what was synced; the songs here stay as they are. */
     fun signOut() {
         pending?.cancel()
@@ -238,6 +340,10 @@ class Cloud private constructor(context: Context) {
         private const val ACCOUNT = "account"
         private const val FOLDER = "folder"
         private const val LAST = "last_sync"
+        private const val LOGIN = "browser_login"
+
+        /** As long as Nextcloud keeps a sign-in in the browser open. */
+        private const val LOGIN_WINDOW = 20 * 60 * 1000L
 
         @Volatile
         private var cloud: Cloud? = null
