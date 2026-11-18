@@ -32,4 +32,12 @@ class SongTest {
         assertEquals(24, s.capo)
         assertEquals(11, s.transpose)
     }
+
+    @Test fun anEditMeetsASyncOnlyWhenTheSongChangedSinceItWasOpened() {
+        org.junit.Assert.assertFalse(editedMeanwhile("2026-11-17T10:00:00-05:00", "2026-11-17T10:00:00-05:00"))
+        org.junit.Assert.assertTrue(editedMeanwhile("2026-11-17T10:05:00-05:00", "2026-11-17T10:00:00-05:00"))
+        // A new song, or one deleted meanwhile, has nothing to meet.
+        org.junit.Assert.assertFalse(editedMeanwhile(null, "2026-11-17T10:00:00-05:00"))
+        org.junit.Assert.assertFalse(editedMeanwhile("2026-11-17T10:05:00-05:00", ""))
+    }
 }

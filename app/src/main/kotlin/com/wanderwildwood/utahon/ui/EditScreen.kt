@@ -58,6 +58,10 @@ fun EditScreen(store: Store, id: String?, draft: Song?, note: Int, onDone: (Stri
     var text by rememberSaveable { mutableStateOf(start.text) }
     var url by rememberSaveable { mutableStateOf(start.url) }
     var length by rememberSaveable { mutableStateOf(lengthText(start.length)) }
+    // The song as it was when the editor opened, kept across a rebuilt window, so a sync that
+    // changes it meanwhile is noticed at Save.
+    val base by rememberSaveable { mutableStateOf(start.modified) }
+    val copySuffix = stringResource(R.string.phone_copy_suffix)
     var leaving by rememberArmedFlag(disarmOnBack = false)
     var nameless by remember { mutableStateOf(false) }
 
@@ -74,7 +78,7 @@ fun EditScreen(store: Store, id: String?, draft: Song?, note: Int, onDone: (Stri
         // A sheet pasted in as ChordPro (chords in brackets inside the words) is kept the way
         // every other sheet is: chords over the words.
         val pro = if (ChordPro.looksLike(text)) ChordPro.read(text) else null
-        val kept = store.save(
+        val kept = store.saveEdit(
             start.copy(
                 title = title.trim(),
                 artist = artist.trim().ifEmpty { pro?.artist.orEmpty() },
@@ -84,6 +88,8 @@ fun EditScreen(store: Store, id: String?, draft: Song?, note: Int, onDone: (Stri
                 url = url.trim(),
                 length = lengthFrom(length),
             ),
+            base,
+            copySuffix,
         )
         onDone(kept.id)
     }

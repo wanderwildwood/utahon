@@ -87,6 +87,20 @@ class Store private constructor(context: Context) {
     }
 
     /**
+     * An edit of a song opened when it was at [base] (its `modified` then). If a sync has
+     * changed the song since, the edit is kept as a copy beside it under [copySuffix], as a sync
+     * conflict keeps both, and neither is written over. Returns the song as kept.
+     */
+    @Synchronized
+    fun saveEdit(song: Song, base: String, copySuffix: String): Song {
+        val now = song.id.takeIf { it.isNotEmpty() }?.let { get(it) }
+        if (editedMeanwhile(now?.modified, base)) {
+            return save(song.copy(id = "", created = "", title = song.title + copySuffix))
+        }
+        return save(song)
+    }
+
+    /**
      * How the reader has set a song (its key, its scroll speed). The stamp moves with it, so a
      * sync carries the setting to the reader's other devices.
      */
@@ -193,3 +207,8 @@ class Store private constructor(context: Context) {
             store ?: synchronized(this) { store ?: Store(context.applicationContext).also { store = it } }
     }
 }
+
+/** Whether a song opened at [base] has been changed since (it is now at [current]); a new song has no base. */
+internal fun editedMeanwhile(current: String?, base: String): Boolean =
+    current != null && base.isNotEmpty() && current != base
+
