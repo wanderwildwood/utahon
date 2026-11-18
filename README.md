@@ -52,6 +52,8 @@ design system. It installs on any device with Android 11 or later.
 - **Tuner** opens from a song's ⋮, and from the tuning line of a song in a tuning of its own,
   when [Tuner](https://github.com/wanderwildwood/onsa) is on the phone.
 - **Search** over titles, artists and words.
+- **Dark mode** in Settings: white on black, for a dim room. It also follows the phone's dark
+  setting, and Home's if Home is installed.
 - **In and out of a file.** Settings saves every song, with the setlists, to one file, and
   brings in a saved songbook, a ChordPro file (`.cho`, `.pro`, `.crd`) or a plain sheet of
   chords over words. A single song can be saved as a ChordPro file, which most songbook
