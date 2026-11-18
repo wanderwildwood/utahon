@@ -107,7 +107,10 @@ class Cloud private constructor(context: Context) {
         _state.value = State.SYNCING
         val remote = NextcloudFolder(a, folder)
         val sync = Sync(remote, StoreSide(store), loadLinks(), phoneSuffix)
-        var lists = listsLink()
+        // Setlists here that could not be read are put together with the cloud's as if never
+        // synced, so the few made since are not sent over the rest.
+        val damaged = setlists.damaged
+        var lists = if (damaged) null else listsLink()
         val outcome = try {
             val failed = sync.run()
             // The songs first, so a setlist that comes down finds its songs here; a song the
@@ -128,6 +131,7 @@ class Cloud private constructor(context: Context) {
         if (_account.value != a || _folder.value != folder) return@withLock
         saveLinks(sync.links.values)
         saveListsLink(lists)
+        if (damaged && lists != null) setlists.mended()
         if (outcome == State.IDLE) {
             _last.value = System.currentTimeMillis()
             prefs.edit().putLong(LAST, _last.value).apply()

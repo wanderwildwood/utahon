@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.util.UUID
 
 /** Songs in the order they are to be played: an evening's set, a lesson, the ones being learned. */
@@ -51,10 +52,32 @@ class Setlists private constructor(context: Context) {
     /** Every setlist, in the order they were made. */
     val all: StateFlow<List<Setlist>> = _all
 
-    private fun load(): List<Setlist> = runCatching {
-        val a = JSONArray(file.readText())
-        (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(Setlist::fromJson) }
-    }.getOrDefault(emptyList())
+    /**
+     * The setlists in the file. One there that cannot be read is not taken for none: it is moved
+     * aside (`setlists.json.bad`) and [damaged] is set, so the next sync takes the cloud's lists
+     * as they are rather than sending these few over them.
+     */
+    private fun load(): List<Setlist> {
+        if (!file.exists()) return emptyList()
+        return runCatching {
+            val a = JSONArray(file.readText())
+            (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(Setlist::fromJson) }
+        }.getOrElse {
+            val bad = File(file.path + ".bad")
+            bad.delete()
+            file.renameTo(bad)
+            prefs.edit().putBoolean(DAMAGED, true).commit()
+            emptyList()
+        }
+    }
+
+    /** The file here could not be read, and the cloud's lists have not yet been brought together with these. */
+    val damaged: Boolean get() = prefs.getBoolean(DAMAGED, false)
+
+    /** A sync has brought the cloud's lists and these together since [damaged] was set. */
+    fun mended() {
+        if (damaged) prefs.edit().remove(DAMAGED).apply()
+    }
 
     fun get(id: String): Setlist? = _all.value.firstOrNull { it.id == id }
 
@@ -83,7 +106,10 @@ class Setlists private constructor(context: Context) {
 
     private fun write(list: List<Setlist>) {
         val tmp = File(file.path + ".tmp")
-        tmp.writeText(JSONArray().also { a -> list.forEach { a.put(it.toJson()) } }.toString(1))
+        FileOutputStream(tmp).use { out ->
+            out.write(JSONArray().also { a -> list.forEach { a.put(it.toJson()) } }.toString(1).toByteArray(Charsets.UTF_8))
+            out.fd.sync()
+        }
         if (!tmp.renameTo(file)) {
             file.delete()
             tmp.renameTo(file)
@@ -115,6 +141,8 @@ class Setlists private constructor(context: Context) {
     }
 
     companion object {
+        private const val DAMAGED = "damaged"
+
         @Volatile
         private var lists: Setlists? = null
 
