@@ -42,6 +42,30 @@ sealed interface Incoming {
     data class File(val uri: Uri) : Incoming
 }
 
+/**
+ * Something handed in and not yet answered, kept when the window is built again (or the process
+ * let go), so the question comes back rather than the share being lost: kind first, then its parts.
+ */
+internal object Asking {
+    fun encode(i: Incoming): ArrayList<String> = when (i) {
+        is Incoming.Link -> arrayListOf("link", i.url)
+        is Incoming.Text -> arrayListOf("text", i.subject, i.text)
+        is Incoming.File -> arrayListOf("file", i.uri.toString())
+    }
+
+    fun decode(saved: List<String>): Incoming? = when (saved.firstOrNull()) {
+        "link" -> saved.getOrNull(1)?.let { Incoming.Link(it) }
+        "text" -> if (saved.size == 3) Incoming.Text(saved[1], saved[2]) else null
+        "file" -> saved.getOrNull(1)?.let { Incoming.File(Uri.parse(it)) }
+        else -> null
+    }
+
+    val saver = androidx.compose.runtime.saveable.Saver<Incoming?, ArrayList<String>>(
+        save = { i -> i?.let(::encode) ?: arrayListOf() },
+        restore = { saved -> decode(saved) },
+    )
+}
+
 /** The places in the app. Each opens over the one it was reached from, and Back closes it. */
 sealed interface Screen {
     data object List : Screen
@@ -135,7 +159,7 @@ fun SongbookApp(incoming: Incoming?, onTaken: () -> Unit) {
 
     // Something handed in by another app waits for a yes: it reads pages, brings songs in and
     // takes the place of the screen that is open, so nothing happens until it is asked for.
-    var asking by remember { mutableStateOf<Incoming?>(null) }
+    var asking by androidx.compose.runtime.saveable.rememberSaveable(stateSaver = Asking.saver) { mutableStateOf<Incoming?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(incoming) {
         val i = incoming ?: return@LaunchedEffect
@@ -198,7 +222,21 @@ fun SongbookApp(incoming: Incoming?, onTaken: () -> Unit) {
             // The next song takes this one's place, so Back from any song of a set is the set.
             onNext = { id, place -> replace(Screen.Sheet(id, place)) },
         )
-        Screen.Reading_Many -> BatchScreen(onBack = ::back, onOpen = { go(Screen.Sheet(it)) })
+        Screen.Reading_Many -> {
+            // The list belongs to the app, not the screen, and is gone if the process was let go:
+            // the addresses are kept with the screen, and read again then (a page already saved
+            // says so rather than being saved twice).
+            val kept = androidx.compose.runtime.saveable.rememberSaveable(
+                saver = androidx.compose.runtime.saveable.Saver<List<String>, ArrayList<String>>(
+                    save = { ArrayList(Batch.items.value.map { it.url }) },
+                    restore = { it },
+                ),
+            ) { Batch.items.value.map { it.url } }
+            LaunchedEffect(Unit) {
+                if (Batch.items.value.isEmpty() && kept.isNotEmpty()) Batch.start(kept, store)
+            }
+            BatchScreen(onBack = ::back, onOpen = { go(Screen.Sheet(it)) })
+        }
         is Screen.Artist -> ArtistScreen(store = store, artist = s.name, onBack = ::back, onOpen = { go(Screen.Sheet(it)) })
         is Screen.Set -> SetlistScreen(store = store, id = s.id, onBack = ::back, onOpen = { id, place -> go(Screen.Sheet(id, place)) })
         is Screen.Edit -> EditScreen(

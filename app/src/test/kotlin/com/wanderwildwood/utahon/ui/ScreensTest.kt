@@ -25,6 +25,17 @@ class ScreensTest {
         assertEquals(stack, stack.map { Screens.decode(Screens.encode(it)) })
     }
 
+    @Test fun aShareWaitingForItsYesComesBackAsItWas() {
+        val waiting = listOf(
+            Incoming.Link("https://tabs.example.com/lantern-road"),
+            Incoming.Text("Paper Boats", "Am  F\nFolded up the morning news\n"),
+            Incoming.Text("", ""),
+        )
+        assertEquals(waiting, waiting.map { Asking.decode(Asking.encode(it)) })
+        assertNull(Asking.decode(emptyList()))
+        assertNull(Asking.decode(listOf("elsewhere", "x")))
+    }
+
     @Test fun somethingElseIsNoScreen() {
         assertNull(Screens.decode("not json"))
         assertNull(Screens.decode("{\"k\":\"elsewhere\"}"))
