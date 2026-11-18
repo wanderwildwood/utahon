@@ -75,7 +75,41 @@ object LoginFlow {
             throw Unreachable(e.message ?: "no answer")
         }
         val poll = json.getJSONObject("poll")
-        return Started(json.getString("login"), poll.getString("endpoint"), poll.getString("token"))
+        return checked(Started(json.getString("login"), poll.getString("endpoint"), poll.getString("token")), normalise(server))
+            ?: throw Refused("login addresses")
+    }
+
+    /**
+     * The server's two addresses, made safe to use, or null when they are not.
+     *
+     * The login page opens in the browser, so it must be a web address; the poll address gets
+     * the token that fetches the app password, so it must be https. Each may name the server
+     * by another host than the one typed here (a server behind a proxy often does), and is
+     * taken as it is when it is https. One that says http on the very host typed here is the
+     * same proxy forgetting it is behind https, and is taken as https. Anything else is refused.
+     * Tolerant on purpose: it was not tried against every kind of server.
+     */
+    internal fun checked(started: Started, server: String): Started? {
+        val host = hostOf(server) ?: return null
+        val login = safe(started.loginUrl, host) ?: return null
+        val poll = safe(started.pollUrl, host) ?: return null
+        return started.copy(loginUrl = login, pollUrl = poll)
+    }
+
+    private fun safe(url: String, typedHost: String): String? {
+        val u = url.trim()
+        return when {
+            u.startsWith("https://", ignoreCase = true) && hostOf(u) != null -> u
+            u.startsWith("http://", ignoreCase = true) && hostOf(u).equals(typedHost, ignoreCase = true) -> "https://" + u.substring("http://".length)
+            else -> null
+        }
+    }
+
+    /** The host of an address ("cloud.example" of "https://cloud.example:8443/x"), or null. */
+    private fun hostOf(url: String): String? {
+        val rest = url.substringAfter("://", "").substringBefore('/').substringBefore('?').substringBefore('#')
+        val host = rest.substringAfterLast('@').let { if (it.startsWith("[")) it.substringBefore(']') + "]" else it.substringBefore(':') }
+        return host.takeIf { it.isNotBlank() }
     }
 
     /**
