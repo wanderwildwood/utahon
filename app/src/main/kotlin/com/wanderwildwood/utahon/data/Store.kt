@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
+import java.io.FileOutputStream
 import java.text.Collator
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -20,9 +21,18 @@ class Store private constructor(context: Context) {
     private val dir = File(context.filesDir, "songs").apply { mkdirs() }
     private val collator = Collator.getInstance().apply { strength = Collator.PRIMARY }
 
-    /** Ids of song files found at start that could not be read; a sync leaves their copies there alone. */
+    /**
+     * Ids of song files found at start that could not be read. A sync never takes them for
+     * deleted, and brings the server's copy back over them; the damaged file is kept beside it
+     * as `<id>.json.bad`.
+     */
     @Volatile
     var unreadable: Set<String> = emptySet()
+        private set
+
+    /** False when the song folder could not be looked into at start: a sync then deletes nothing in the cloud. */
+    @Volatile
+    var listed: Boolean = true
         private set
 
     private val _all = MutableStateFlow(load())
@@ -40,7 +50,9 @@ class Store private constructor(context: Context) {
 
     private fun load(): List<Song> {
         val bad = mutableSetOf<String>()
-        val songs = dir.listFiles { f -> f.isFile && f.name.endsWith(".json") }.orEmpty().mapNotNull { f ->
+        val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".json") }
+        listed = files != null
+        val songs = files.orEmpty().mapNotNull { f ->
             val song = runCatching { Song.allIn(f.readText()).firstOrNull() }.getOrNull()
                 ?.let { if (it.id.isEmpty()) it.copy(id = f.name.removeSuffix(".json")) else it }
             if (song == null) bad += f.name.removeSuffix(".json")
@@ -137,10 +149,23 @@ class Store private constructor(context: Context) {
         return true
     }
 
+    /**
+     * The file written whole and flushed to the disk before it is moved over the old one. One
+     * that could not be read at start is first moved aside, not written over.
+     */
     private fun write(song: Song) {
         val file = File(dir, "${safe(song.id)}.json")
         val tmp = File(dir, "${safe(song.id)}.json.tmp")
-        tmp.writeText(song.toJson().toString(1))
+        if (song.id in unreadable) {
+            val bad = File(dir, "${safe(song.id)}.json.bad")
+            bad.delete()
+            file.renameTo(bad)
+            unreadable = unreadable - song.id
+        }
+        FileOutputStream(tmp).use { out ->
+            out.write(song.toJson().toString(1).toByteArray(Charsets.UTF_8))
+            out.fd.sync()
+        }
         if (!tmp.renameTo(file)) {
             file.delete()
             tmp.renameTo(file)

@@ -24,6 +24,12 @@ class SyncTest {
         /** Changing a file underneath, between a sync's listing and its write. */
         var meddle: (() -> Unit)? = null
 
+        /** As the server says after the song folder was renamed or taken away and had to be made again. */
+        var folderMade = false
+
+        /** A name the server will not take (a 415, a full quota), as a plain failure. */
+        var refuse: String? = null
+
         /** As another program or the web would: a file written there. */
         fun putThere(file: String, text: String) {
             val f = files[file]
@@ -38,7 +44,7 @@ class SyncTest {
                 val stem = file.substringBeforeLast('.')
                 f.id to RemoteSong(f.id, folder, stem, file.substring(stem.length), f.etag)
             }.toMap()
-            return Listing(songs, songs.values.map { it.place }.toSet())
+            return Listing(songs, songs.values.map { it.place }.toSet(), made = folderMade)
         }
 
         private fun fileOf(r: RemoteSong) = files.entries.firstOrNull { it.value.id == r.fileId }
@@ -50,6 +56,7 @@ class SyncTest {
 
         override fun create(folder: String, name: String, text: String): RemoteSong {
             val file = placeOf(folder, name) + SongFile.EXTENSION
+            if (refuse != null && name.contains(refuse!!)) throw java.io.IOException("415 for $file")
             if (files.keys.any { it.equals(file, ignoreCase = true) }) throw Taken(file)
             val f = File("${next++}", text, tag())
             files[file] = f
@@ -95,12 +102,18 @@ class SyncTest {
         val all = linkedMapOf<String, Song>()
         var cannotRead = emptySet<String>()
         override fun unreadable(): Set<String> = cannotRead
+        var couldList = true
+        override fun listed(): Boolean = couldList
+
+        /** As the reader might, in the moment after a sync keeps a song: something done here. */
+        var afterPut: ((Song) -> Unit)? = null
         private var ids = 0
         private var clock = 0
         override fun songs(): List<Song> = all.values.toList()
         override fun put(song: Song, expect: String?): Boolean {
             if (all[song.id]?.modified != expect) return false
             all[song.id] = song
+            afterPut?.invoke(song)
             return true
         }
         override fun remove(id: String, expect: String): Boolean {
@@ -120,10 +133,11 @@ class SyncTest {
     private val phone = Phone()
     private var links = emptyMap<String, Link>()
 
-    private fun sync() {
+    private fun sync(): java.io.IOException? {
         val s = Sync(cloud, phone, links, " (phone)")
-        s.run()
+        val failed = s.run()
         links = s.links.toMap()
+        return failed
     }
 
     private fun lantern(text: String = "G    C\nLantern road\n") = Song(id = "a", title = "Lantern Road", artist = "Ada Whitlock", text = text, capo = 2)
@@ -294,20 +308,65 @@ class SyncTest {
         assertEquals(4, cloud.files.size)
     }
 
-    @Test fun aSongThisPhoneCouldNotReadIsNotDeletedThere() {
+    @Test fun aSongThisPhoneCouldNotReadIsNotDeletedThereButComesBack() {
         phone.save(lantern())
         sync()
         phone.all.remove("a"); phone.cannotRead = setOf("a")
         sync()
         assertEquals(1, cloud.files.size)
+        assertEquals("Lantern Road", phone.all.getValue("a").title)
+        assertEquals(1, links.size)
     }
 
-    @Test fun aPhoneWithNoneOfItsSongsDeletesNothingThere() {
+    @Test fun aPhoneThatCouldNotLookAtItsSongsDeletesNothingThere() {
+        for (i in 1..4) phone.save(Song(id = "s$i", title = "Song $i", text = "G\nla $i\n"))
+        sync()
+        phone.all.clear(); phone.couldList = false
+        sync()
+        assertEquals(4, cloud.files.size)
+    }
+
+    @Test fun everySongDeletedHereIsDeletedThere() {
         for (i in 1..4) phone.save(Song(id = "s$i", title = "Song $i", text = "G\nla $i\n"))
         sync()
         phone.all.clear()
         sync()
-        assertEquals(4, cloud.files.size)
+        assertTrue(cloud.files.isEmpty())
+        assertTrue(links.isEmpty())
+    }
+
+    @Test fun aSongFolderMadeAgainDeletesNothingHere() {
+        phone.save(lantern())
+        sync()
+        // Renamed on the server: the folder the phone syncs with is made again, empty.
+        cloud.files.clear(); cloud.folderMade = true
+        sync()
+        assertEquals(1, phone.songs().size)
+        assertEquals(setOf("Ada Whitlock/Lantern Road.cho"), cloud.files.keys)
+    }
+
+    @Test fun oneSongTheServerRefusesHoldsUpNoOther() {
+        phone.save(Song(id = "b", title = "Refused Song", text = "G\nla\n"))
+        phone.save(lantern())
+        cloud.refuse = "Refused"
+        val failed = sync()
+        assertTrue(failed != null)
+        assertEquals(setOf("Ada Whitlock/Lantern Road.cho"), cloud.files.keys)
+        cloud.refuse = null
+        assertNull(sync())
+        assertEquals(2, cloud.files.size)
+    }
+
+    @Test fun aSongDeletedHereDuringAConflictDoesNotEndTheSync() {
+        phone.save(lantern())
+        sync()
+        phone.save(phone.all.getValue("a").copy(text = "Em\nMine now\n"))
+        cloud.putThere("Ada Whitlock/Lantern Road.cho", "{title: Lantern Road}\n{artist: Ada Whitlock}\n[D]Theirs now\n")
+        phone.afterPut = { if (it.id == "a") phone.all.remove("a") }
+        assertNull(sync())
+        phone.afterPut = null
+        assertEquals(listOf("Lantern Road (phone)"), titles())
+        assertTrue(cloud.files.keys.any { it.startsWith("Ada Whitlock/Lantern Road (phone)") })
     }
 
     @Test fun aFileChangedUnderAWriteIsLeftForNextTime() {

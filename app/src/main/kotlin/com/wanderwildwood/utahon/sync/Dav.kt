@@ -30,8 +30,11 @@ data class RemoteSong(val fileId: String, val folder: String, val name: String, 
 /** A song's place under the song folder: its folder and its name, or the name alone. */
 fun placeOf(folder: String, name: String): String = if (folder.isEmpty()) name else "$folder/$name"
 
-/** The songs in the folder, by [RemoteSong.fileId], and the [RemoteSong.place] of every song file in it. */
-data class Listing(val songs: Map<String, RemoteSong>, val places: Set<String>)
+/**
+ * The songs in the folder, by [RemoteSong.fileId], and the [RemoteSong.place] of every song file
+ * in it. [made] when the folder was not there and had to be made.
+ */
+data class Listing(val songs: Map<String, RemoteSong>, val places: Set<String>, val made: Boolean = false)
 
 /** The file was not what this phone last saw: changed, or gone, since. */
 class Changed(message: String) : IOException(message)
@@ -100,9 +103,9 @@ class NextcloudFolder(
         val top = try {
             propfind(root, 1)
         } catch (_: Missing) {
-            // The first sync to a folder not made yet.
+            // The first sync to a folder not made yet, or one renamed or taken away on the server.
             makeFolders()
-            return Listing(emptyMap(), emptySet())
+            return Listing(emptyMap(), emptySet(), made = true)
         }
         val rootPath = decodeHref(root)
         val songs = mutableMapOf<String, RemoteSong>()

@@ -120,8 +120,9 @@ class NextcloudFolderTest {
     private val root = "/remote.php/dav/files/ada/Music/Songbook/"
 
     @Test fun theFirstListingMakesTheFolder() {
-        assertEquals(Listing(emptyMap(), emptySet()), folder().list())
+        assertEquals(Listing(emptyMap(), emptySet(), made = true), folder().list())
         assertTrue(root in folders && "/remote.php/dav/files/ada/Music/" in folders)
+        assertFalse(folder().list().made)
     }
 
     @Test fun createsReadsWritesRenamesAndDeletes() {

@@ -109,10 +109,11 @@ class Cloud private constructor(context: Context) {
         val sync = Sync(remote, StoreSide(store), loadLinks(), phoneSuffix)
         var lists = listsLink()
         val outcome = try {
-            sync.run()
-            // The songs first, so a setlist that comes down finds its songs here.
+            val failed = sync.run()
+            // The songs first, so a setlist that comes down finds its songs here; a song the
+            // server would not take holds the setlists up no more than the other songs.
             lists = SetlistSync.run(remote, ListsSide(setlists), lists, phoneSuffix)
-            State.IDLE
+            if (failed != null) State.FAILED else State.IDLE
         } catch (_: Refused) {
             State.REFUSED
         } catch (_: Unreachable) {
@@ -211,6 +212,7 @@ class Cloud private constructor(context: Context) {
     private class StoreSide(private val store: Store) : Local {
         override fun songs(): List<Song> = store.all.value
         override fun unreadable(): Set<String> = store.unreadable
+        override fun listed(): Boolean = store.listed
         override fun put(song: Song, expect: String?) = store.putSynced(song, expect)
         override fun remove(id: String, expect: String) = store.removeSynced(id, expect)
         override fun newId() = store.newId()

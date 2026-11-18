@@ -43,8 +43,11 @@ data class Link(val id: String, val remote: RemoteSong, val modified: String) {
 interface Local {
     fun songs(): List<Song>
 
-    /** Ids of songs whose files are here but could not be read: never taken for deleted. */
+    /** Ids of songs whose files are here but could not be read: never taken for deleted, and fetched again from the cloud. */
     fun unreadable(): Set<String> = emptySet()
+
+    /** False when the folder the songs are kept in could not be looked into at all: none of them is then taken for deleted. */
+    fun listed(): Boolean = true
 
     /**
      * [song] kept exactly as given, its stamps included, only if the song of its id here is
@@ -92,15 +95,23 @@ sealed interface Action {
  * Nothing is lost on either side. A change beats a deletion, whichever side made which; changes
  * on both sides keep both. When every linked file has gone at once (the folder renamed or
  * swapped on the server, say), nothing is deleted here: the links are let go, and the songs are
- * matched by name or sent again.
+ * matched by name or sent again. A song file here that could not be read is fetched again from
+ * the server's copy; a phone whose song folder could not be looked into ([listed] false)
+ * deletes nothing there.
  */
-fun plan(locals: List<Song>, links: Map<String, Link>, listing: Listing, unreadable: Set<String> = emptySet()): List<Action> {
+fun plan(
+    locals: List<Song>,
+    links: Map<String, Link>,
+    listing: Listing,
+    unreadable: Set<String> = emptySet(),
+    listed: Boolean = true,
+): List<Action> {
     val here = locals.associateBy { it.id }
     val there = listing.songs
-    val usable = if (links.size >= 3 && links.values.none { it.remote.fileId in there }) emptyMap() else links
-    // The same the other way: none of several linked songs here is a phone that could not read
-    // its songs, not one where they were all deleted. Nothing is deleted there for it.
-    val noneHere = links.size >= 3 && links.keys.none { it in here }
+    // The song folder had to be made again (renamed, moved or taken away on the server), or
+    // several linked files are all gone at once: the links are not trusted to delete anything.
+    val allGone = listing.made || (links.size >= 3 && links.values.none { it.remote.fileId in there })
+    val usable = if (allGone) emptyMap() else links
 
     val out = mutableListOf<Action>()
     val linkedIds = mutableSetOf<String>()
@@ -112,7 +123,12 @@ fun plan(locals: List<Song>, links: Map<String, Link>, listing: Listing, unreada
         if (r != null) linkedFiles += r.fileId
         val changedHere = l != null && l.modified != link.modified
         val changedThere = r != null && r.etag != link.remote.etag
-        if (l == null && r != null && !changedThere && (link.id in unreadable || noneHere)) continue
+        if (l == null && r != null && !listed) continue
+        if (l == null && r != null && link.id in unreadable) {
+            // The file here is damaged: the server's copy is brought back over it.
+            out += Action.Pull(link, r)
+            continue
+        }
         out += when {
             l == null && r == null -> Action.Forget(link)
             r == null -> if (changedHere) Action.Send(link.id) else Action.DeleteHere(link)
@@ -153,9 +169,10 @@ private val ID = Regex("[A-Za-z0-9_-]{1,80}")
  * the title of the phone's copy when both sides changed a song (" (phone)").
  *
  * A file that changed on the server between the listing and the write ([Changed]) is left for
- * the next sync, which sees it as changed and does the right thing then. Anything else that
- * fails ends the sync where it is; [links] holds what was done up to there, for the caller to
- * keep either way.
+ * the next sync, which sees it as changed and does the right thing then. One that the server
+ * will not take is passed over, and the first such failure is given back once the rest are
+ * done. Signed out ([Refused]) or no server ([Unreachable]) ends the sync where it is; [links]
+ * holds what was done up to there, for the caller to keep either way.
  */
 class Sync(
     private val remote: Remote,
@@ -165,9 +182,10 @@ class Sync(
 ) {
     val links: MutableMap<String, Link> = start.toMutableMap()
 
-    fun run() {
+    /** The sync; the first failure of a song the server would not take, or null when there was none. */
+    fun run(): IOException? {
         val listing = remote.list()
-        val actions = plan(local.songs(), links, listing, local.unreadable())
+        val actions = plan(local.songs(), links, listing, local.unreadable(), local.listed())
         // Every link not dropped by the plan's own "all gone" rule is acted on by it; the rest go.
         val acted = actions.mapNotNull { linkOf(it)?.id }.toSet()
         val listed = listing.songs.keys
@@ -190,7 +208,7 @@ class Sync(
             }
         }
         tidy(taken)
-        failed?.let { throw it }
+        return failed
     }
 
     /**
@@ -267,8 +285,9 @@ class Sync(
                 val copy = mine.copy(id = local.newId(), title = mine.title + phoneSuffix, modified = local.now())
                 if (!local.put(copy, null)) return
                 if (local.put(stamped(theirs.copy(id = mine.id)), mine.modified)) {
-                    val kept = local.songs().first { it.id == mine.id }
-                    links[mine.id] = Link(mine.id, a.remote.copy(etag = etag), kept.modified)
+                    // Deleted here in the moment between: the link goes with the next sync.
+                    val kept = local.songs().firstOrNull { it.id == mine.id }
+                    if (kept != null) links[mine.id] = Link(mine.id, a.remote.copy(etag = etag), kept.modified)
                 }
                 send(copy, taken)
             }
