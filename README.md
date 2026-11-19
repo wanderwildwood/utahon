@@ -72,6 +72,13 @@ your real one. "Sign in with the browser instead" goes through Nextcloud's own l
 its apps do, for a server that asks for more at its door. The folder starts as `Songbook` and
 can be changed.
 
+Where Home (the launcher) is signed in to a Nextcloud, the screen has one more row: "Use the
+phone's Nextcloud account". Pressed, Songbook uses Home's account instead of its own sign-in,
+and follows it: a new app password there is taken, and when Home signs out Songbook is signed
+out too, with the songs left on the phone, until Home has the same account back. "Stop using
+it" goes back to the app's own sign-in. Songbook asks Home only after checking that Home is the
+real one, by its package and signing certificate.
+
 A song is one file, named for its title, in a folder named for its artist
 (`Ada Whitlock/Lantern Road.cho`); a song that names no artist sits beside the folders. Give a
 song another artist and its file moves; a file put into an artist's folder by hand, with no

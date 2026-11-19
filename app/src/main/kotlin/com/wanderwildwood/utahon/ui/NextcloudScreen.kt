@@ -11,6 +11,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,7 +28,10 @@ import com.mudita.mmd.components.top_app_bar.TopAppBarMMD
 import com.wanderwildwood.utahon.R
 import com.wanderwildwood.utahon.sync.Account
 import com.wanderwildwood.utahon.sync.Cloud
+import com.wanderwildwood.utahon.sync.HomeAccount
 import com.wanderwildwood.utahon.sync.LoginFlow
+import com.wanderwildwood.utahon.sync.Refused
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,7 +41,8 @@ import java.util.Date
 /**
  * Nextcloud: signing in, and once in, the folder, a sync on demand and signing out. Signing in
  * is typed: the server, the login name and an app password made in Nextcloud. The server's own
- * page in the browser, as Nextcloud's apps use, is the second way.
+ * page in the browser, as Nextcloud's apps use, is the second way. Where Home (the launcher)
+ * holds the phone's Nextcloud account, one row takes that one instead (sync/HomeAccount.kt).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,6 +63,46 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
     var starting by remember { mutableStateOf(false) }
     var problem by remember { mutableStateOf<Int?>(null) }
     var newFolder by remember(folder) { mutableStateOf(folder) }
+    // Home's account: whether Home has one for this app, asked off the main thread when the
+    // screen opens, when the account here changes, and on each change notice from Home.
+    val homeWho by cloud.homeWho.collectAsStateWithLifecycle()
+    var homeChanged by remember { mutableStateOf(0) }
+    var homeAvailable by remember { mutableStateOf(false) }
+    var takingHome by remember { mutableStateOf(false) }
+    DisposableEffect(Unit) {
+        val stop = HomeAccount.observe(context) { homeChanged++ }
+        onDispose { stop() }
+    }
+    LaunchedEffect(homeChanged, account, homeWho) {
+        homeAvailable = withContext(Dispatchers.IO) { HomeAccount.available(context) }
+    }
+    fun useHome() {
+        if (takingHome) return
+        takingHome = true
+        problem = null
+        scope.launch {
+            try {
+                // Read again at the press, so the screen keeps no password of its own.
+                val held = withContext(Dispatchers.IO) { HomeAccount.read(context) }
+                if (held == null) {
+                    homeAvailable = false
+                    return@launch
+                }
+                problem = try {
+                    cloud.useHome(held)
+                    null
+                } catch (e: Refused) {
+                    R.string.cloud_refused
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    R.string.cloud_unreachable
+                }
+            } finally {
+                takingHome = false
+            }
+        }
+    }
     LaunchedEffect(signing.problem) {
         signing.problem?.let {
             problem = it
@@ -79,7 +124,8 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
             val a = account
             if (a != null) {
                 item(key = "account") {
-                    SettingRow(stringResource(R.string.cloud_account), stringResource(R.string.cloud_signed_in, a.user, a.server.removePrefix("https://")), onClick = null)
+                    val who = if (homeWho != null) R.string.home_account_in_use else R.string.cloud_signed_in
+                    SettingRow(stringResource(R.string.cloud_account), stringResource(who, a.user, shownServer(a.server)), onClick = null)
                 }
                 item(key = "sync") {
                     val status = when (state) {
@@ -101,11 +147,30 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                     item(key = "use") { WideButton(stringResource(R.string.cloud_use_folder), filled = true) { cloud.setFolder(newFolder) } }
                 }
                 item(key = "folder_note") { Note(stringResource(R.string.cloud_folder_note)) }
+                if (homeWho == null && homeAvailable) {
+                    item(key = "home") { SettingRow(stringResource(R.string.home_account_use), null, onClick = ::useHome) }
+                    problem?.let { p -> item(key = "problem") { Note(stringResource(p)) } }
+                }
                 item(key = "out") {
-                    ArmedRow(stringResource(R.string.cloud_sign_out), stringResource(R.string.cloud_sign_out_armed)) { cloud.signOut() }
+                    if (homeWho != null) {
+                        ArmedRow(stringResource(R.string.home_account_stop), stringResource(R.string.home_account_stop_armed)) { cloud.signOut() }
+                    } else {
+                        ArmedRow(stringResource(R.string.cloud_sign_out), stringResource(R.string.cloud_sign_out_armed)) { cloud.signOut() }
+                    }
+                }
+            } else if (homeWho != null) {
+                // Home signed out, or is gone: so is this app, until Home has the same account back.
+                item(key = "home_out") {
+                    Note(stringResource(R.string.home_account_signed_out, stringResource(R.string.home_account_kept)))
+                }
+                item(key = "out") {
+                    ArmedRow(stringResource(R.string.home_account_stop), stringResource(R.string.home_account_stop_armed)) { cloud.signOut() }
                 }
             } else {
                 item(key = "explain") { Note(stringResource(R.string.cloud_explain)) }
+                if (homeAvailable) {
+                    item(key = "home") { SettingRow(stringResource(R.string.home_account_use), null, onClick = ::useHome) }
+                }
                 item(key = "server") {
                     Field(stringResource(R.string.cloud_server), server, { server = it; problem = null }, hint = stringResource(R.string.cloud_server_hint), url = true)
                 }
@@ -173,6 +238,9 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
         }
     }
 }
+
+/** The server as it is shown: without https:// (or a debug build's http://). */
+internal fun shownServer(server: String): String = server.removePrefix("https://").removePrefix("http://")
 
 /** A line or two of explanation between the rows. */
 @Composable

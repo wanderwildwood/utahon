@@ -16,7 +16,10 @@ synced with your own Nextcloud, one ChordPro file each in the folder you choose,
 else. Sign-in is typed: the server's address, your login name and an app password made in
 Nextcloud for this phone. Or, instead, on the server's own page in your browser, which gives this
 phone an app password of its own. Either way you can revoke it from the server's security
-settings. Before you sign in, and after
+settings. Or, where Home (the launcher) is signed in to a Nextcloud and you press "Use the
+phone's Nextcloud account", Songbook asks Home for that account (address, login name and app
+password) after checking that Home is the real one, and asks again each time the app opens and
+when Home says it changed. Before you sign in, and after
 you sign out, nothing goes there.
 
 Until you sign in to a Nextcloud, a sheet you type, paste, or share to Songbook from another app

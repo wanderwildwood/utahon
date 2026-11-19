@@ -50,6 +50,7 @@ fun SettingsScreen(store: Store, onBack: () -> Unit, onAbout: () -> Unit, onOpen
     val turn by prefs.turn.collectAsStateWithLifecycle()
     val cloud = remember { Cloud.get(context) }
     val account by cloud.account.collectAsStateWithLifecycle()
+    val homeWho by cloud.homeWho.collectAsStateWithLifecycle()
 
     val export = rememberLauncherForActivityResult(FilesCreateDocument("application/json")) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
@@ -110,7 +111,8 @@ fun SettingsScreen(store: Store, onBack: () -> Unit, onAbout: () -> Unit, onOpen
                 val a = account
                 SettingRow(
                     stringResource(R.string.cloud_title),
-                    if (a == null) stringResource(R.string.cloud_off) else stringResource(R.string.cloud_signed_in, a.user, a.server.removePrefix("https://")),
+                    if (a == null) stringResource(R.string.cloud_off)
+                    else stringResource(if (homeWho != null) R.string.home_account_in_use else R.string.cloud_signed_in, a.user, shownServer(a.server)),
                     onClick = onNextcloud,
                 )
             }

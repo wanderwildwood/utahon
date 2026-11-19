@@ -14,6 +14,7 @@ import androidx.core.content.IntentCompat
 import com.mudita.mmd.ThemeMMD
 import com.wanderwildwood.utahon.importer.Reader
 import com.wanderwildwood.utahon.sync.Cloud
+import com.wanderwildwood.utahon.sync.HomeAccount
 import com.wanderwildwood.utahon.ui.Hands
 import com.wanderwildwood.utahon.ui.Incoming
 import com.wanderwildwood.utahon.ui.SongbookApp
@@ -27,6 +28,8 @@ class MainActivity : ComponentActivity() {
     private val incoming = mutableStateOf<Incoming?>(null)
 
     private val turner = TurnWithPhone(this)
+
+    private var stopFollowingHome: () -> Unit = {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,12 +51,22 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         // Nothing happens here unless the reader has signed in to a Nextcloud.
-        Cloud.get(this).onOpen()
+        val cloud = Cloud.get(this)
+        cloud.onOpen()
+        // An account taken from Home is asked after again whenever Home says it changed.
+        stopFollowingHome = HomeAccount.observe(this) { cloud.followHome() }
     }
 
     override fun onResume() {
         super.onResume()
         turner.resume()
+        Cloud.get(this).followHome()
+    }
+
+    override fun onStop() {
+        stopFollowingHome()
+        stopFollowingHome = {}
+        super.onStop()
     }
 
     override fun onPause() {

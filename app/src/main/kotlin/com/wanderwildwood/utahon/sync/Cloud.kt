@@ -32,9 +32,15 @@ import java.io.IOException
  * The account is kept in the app's private preferences, sealed (see [Secrets]). The password in
  * it is an app password made for this phone, which the server can revoke on its own, without
  * the real one changing.
+ *
+ * Or the account is the phone's, the one Home holds ([HomeAccount]). Then the app keeps only the
+ * choice ([HOME_WHO]: server and user) and the stamp it last took; the sealed account is a copy
+ * of Home's, written from Home on start, resume and each change there, and removed when Home
+ * signs out, is gone, or holds another account ([followHome]).
  */
 class Cloud private constructor(context: Context) {
 
+    private val appContext = context.applicationContext
     private val store = Store.get(context)
     private val setlists = Setlists.get(context)
     private val prefs = context.getSharedPreferences("nextcloud", Context.MODE_PRIVATE)
@@ -73,6 +79,13 @@ class Cloud private constructor(context: Context) {
      */
     data class SignIn(val browser: Boolean = false, val problem: Int? = null)
 
+    /**
+     * The account Home holds that this app follows ([HomeAccount.Held.who]), or null when the
+     * app uses its own sign-in or none. Set while Home is signed out too: [account] is then null.
+     */
+    private val _homeWho = MutableStateFlow(prefs.getString(HOME_WHO, null))
+    val homeWho: StateFlow<String?> = _homeWho
+
     private val _signing = MutableStateFlow(SignIn())
     val signing: StateFlow<SignIn> = _signing
     private var signingJob: Job? = null
@@ -83,9 +96,54 @@ class Cloud private constructor(context: Context) {
         resumeBrowser()
     }
 
-    /** On opening the app: a sync, unless one was tried in the last minute. */
+    /**
+     * On opening the app: Home asked after its account (when it is the one used), and a sync,
+     * unless one was tried in the last minute.
+     */
     fun onOpen() {
-        if (System.currentTimeMillis() - lastTry > 60_000) syncNow()
+        scope.launch {
+            val took = followHomeNow() is HomeAccount.Step.Take
+            if (took || System.currentTimeMillis() - lastTry > 60_000) syncNow()
+        }
+    }
+
+    /** On resuming, and on each change notice from Home: Home asked again, off the main thread. */
+    fun followHome() {
+        scope.launch { if (followHomeNow() is HomeAccount.Step.Take) syncNow() }
+    }
+
+    /**
+     * Where the account is Home's: asks Home and does as [HomeAccount.follow] says. A new password
+     * for the same account takes the old one's place, with the folder and what was synced kept.
+     * When Home has signed out or is gone, the copy is let go and this reads as signed out, still
+     * following, so the same account is taken again when Home has it back; when Home holds
+     * another account, the choice goes too. The songs here, the folder and what was synced stay.
+     * Never on the main thread.
+     */
+    @Synchronized
+    private fun followHomeNow(): HomeAccount.Step {
+        val who = _homeWho.value ?: return HomeAccount.Step.Keep
+        val step = HomeAccount.follow(who, prefs.getString(HOME_STAMP, null).orEmpty(), HomeAccount.ask(appContext))
+        when (step) {
+            is HomeAccount.Step.Keep -> Unit
+            is HomeAccount.Step.Take -> {
+                val a = Account(step.held.server, step.held.user, step.held.password)
+                val sealed = Secrets.seal(a.toJson().toString())
+                prefs.edit().apply { if (sealed != null) putString(ACCOUNT, sealed) else remove(ACCOUNT) }
+                    .putString(HOME_STAMP, step.held.stamp).apply()
+                _account.value = a
+                _state.value = State.IDLE
+            }
+            is HomeAccount.Step.Drop -> {
+                pending?.cancel()
+                _account.value = null
+                _state.value = State.OFF
+                prefs.edit().remove(ACCOUNT).putString(HOME_STAMP, "")
+                    .apply { if (!step.following) remove(HOME_WHO) }.apply()
+                if (!step.following) _homeWho.value = null
+            }
+        }
+        return step
     }
 
     fun syncNow() {
@@ -115,6 +173,8 @@ class Cloud private constructor(context: Context) {
     }
 
     private suspend fun sync() = lock.withLock {
+        // An account taken from Home is never used past a change there.
+        followHomeNow()
         val a = _account.value ?: return@withLock
         val folder = _folder.value
         lastTry = System.currentTimeMillis()
@@ -163,14 +223,51 @@ class Cloud private constructor(context: Context) {
             // Only the sealed form is ever written; with no keystore the account lasts this run only.
             val sealed = Secrets.seal(a.toJson().toString())
             prefs.edit().apply { if (sealed != null) putString(ACCOUNT, sealed) else remove(ACCOUNT) }
-                .putString(FOLDER, DEFAULT_FOLDER).remove(LAST).remove(LISTS_ETAG).remove(LISTS_STAMP).apply()
+                .putString(FOLDER, DEFAULT_FOLDER).remove(LAST).remove(LISTS_ETAG).remove(LISTS_STAMP)
+                .remove(HOME_WHO).remove(HOME_STAMP).apply()
             linksFile.delete()
             _folder.value = DEFAULT_FOLDER
             _last.value = 0L
+            _homeWho.value = null
             _account.value = a
             _state.value = State.IDLE
         }
         syncNow()
+    }
+
+    /**
+     * The phone's Nextcloud account, the one Home holds, taken at the reader's press in place of
+     * the app's own sign-in, after making sure it opens the files on the server. Followed from
+     * now on ([followHome]). The same account as the one signed in to here keeps its folder and
+     * what was synced. Throws [Refused] or [Unreachable] when the account will not do.
+     */
+    suspend fun useHome(held: HomeAccount.Held) {
+        stopBrowser()
+        val a = Account(held.server, held.user, held.password)
+        val current = _account.value
+        if (current == null || HomeAccount.who(current.server, current.user) != held.who) {
+            signIn(a)
+        } else {
+            withContext(Dispatchers.IO) { NextcloudFolder(a, _folder.value).probe() }
+            lock.withLock {
+                val sealed = Secrets.seal(a.toJson().toString())
+                prefs.edit().apply { if (sealed != null) putString(ACCOUNT, sealed) else remove(ACCOUNT) }.apply()
+                _account.value = a
+                _state.value = State.IDLE
+            }
+            syncNow()
+        }
+        lock.withLock {
+            prefs.edit().putString(HOME_WHO, held.who).putString(HOME_STAMP, held.stamp).apply()
+            _homeWho.value = held.who
+        }
+    }
+
+    /** A wait for the browser's sign-in given up, as another way in was taken. */
+    private fun stopBrowser() {
+        signingJob?.cancel()
+        prefs.edit().remove(LOGIN).apply()
+        _signing.value = SignIn()
     }
 
     /** [a] kept as [signIn] does, in the background; what went wrong is said through [signing]. */
@@ -261,13 +358,19 @@ class Cloud private constructor(context: Context) {
         R.string.cloud_unreachable
     }
 
-    /** Forgets the account and what was synced; the songs here stay as they are. */
+    /**
+     * Forgets the account and what was synced; the songs here stay as they are. For Home's
+     * account this is "Stop using it": the choice, the stamp and the copy go, and the app's own
+     * sign-in comes back, empty.
+     */
     fun signOut() {
         pending?.cancel()
         _account.value = null
         _state.value = State.OFF
         _last.value = 0L
-        prefs.edit().remove(ACCOUNT).remove(LAST).remove(FOLDER).remove(LISTS_ETAG).remove(LISTS_STAMP).apply()
+        prefs.edit().remove(ACCOUNT).remove(LAST).remove(FOLDER).remove(LISTS_ETAG).remove(LISTS_STAMP)
+            .remove(HOME_WHO).remove(HOME_STAMP).apply()
+        _homeWho.value = null
         _folder.value = DEFAULT_FOLDER
         scope.launch { lock.withLock { linksFile.delete() } }
     }
@@ -341,6 +444,8 @@ class Cloud private constructor(context: Context) {
         private const val FOLDER = "folder"
         private const val LAST = "last_sync"
         private const val LOGIN = "browser_login"
+        private const val HOME_WHO = "home_who"
+        private const val HOME_STAMP = "home_stamp"
 
         /** As long as Nextcloud keeps a sign-in in the browser open. */
         private const val LOGIN_WINDOW = 20 * 60 * 1000L

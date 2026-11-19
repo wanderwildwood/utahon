@@ -238,6 +238,15 @@
     <string name="cloud_use_folder">Use this folder</string>
     <string name="cloud_sign_out">Sign out</string>
     <string name="cloud_sign_out_armed">Sign out — tap again</string>
+    <!-- The phone's one Nextcloud account, the one Home (the launcher) holds -->
+    <string name="home_account_use">Use the phone\'s Nextcloud account</string>
+    <!-- "ada on cloud.example.org, from Home." The server without https:// -->
+    <string name="home_account_in_use">%1$s on %2$s, from Home.</string>
+    <string name="home_account_stop">Stop using it</string>
+    <string name="home_account_stop_armed">Stop using it — tap again</string>
+    <!-- %1$s is home_account_kept -->
+    <string name="home_account_signed_out">Home is signed out of Nextcloud, so this app is too. Your %1$s stay on the phone.</string>
+    <string name="home_account_kept">songs and setlists</string>
     <!-- After the title of the phone\'s copy of a song changed both here and in Nextcloud since
          the last sync: both are kept, the phone\'s as "Lantern Road (phone)" -->
     <string name="phone_copy_suffix">\u0020(phone)</string>
