@@ -76,7 +76,7 @@ interface Remote {
 }
 
 /**
- * The song folder in a Nextcloud, over WebDAV: `remote.php/dav/files/<user>/<folder>/`, one
+ * The song folder in a Nextcloud, over WebDAV: `remote.php/dav/files/<uid>/<folder>/`, one
  * ChordPro file per song, each in a folder named for its artist. Nextcloud keeps an etag for every file, says the new one after a
  * write, honours If-Match and If-None-Match, and gives every file an id that a rename keeps,
  * which is everything this leans on.
@@ -87,7 +87,7 @@ class NextcloudFolder(
     private val client: OkHttpClient = http,
 ) : Remote {
 
-    private val home = account.server.trimEnd('/') + "/remote.php/dav/files/" + encodePath(account.user) + "/"
+    private val home = account.server.trimEnd('/') + "/remote.php/dav/files/" + encodePath(account.uid) + "/"
     private val folder = folder.trim('/', ' ')
     private val root = home + encodePath(this.folder) + "/"
 
@@ -290,7 +290,7 @@ class NextcloudFolder(
         try {
             propfind(home, 0)
         } catch (_: Missing) {
-            throw Refused("no files for ${account.user}")
+            throw Refused("no files for ${account.uid}")
         }
     }
 

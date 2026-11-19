@@ -88,6 +88,12 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                     homeAvailable = false
                     return@launch
                 }
+                // A debug Home may hold an http:// test server; this app sends plain http only
+                // to the hosts its network config allows (an emulator's computer, the phone).
+                if (!cleartextAllowed(held.server)) {
+                    problem = R.string.cloud_needs_https
+                    return@launch
+                }
                 problem = try {
                     cloud.useHome(held)
                     null
@@ -239,8 +245,31 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
     }
 }
 
-/** The server as it is shown: without https:// (or a debug build's http://). */
-internal fun shownServer(server: String): String = server.removePrefix("https://").removePrefix("http://")
+/**
+ * The server as it is shown, the same for Home's account and the app's own: without https://
+ * (or a debug build's http://), without the port that scheme has anyway (443, 80) or a slash at
+ * the end; any other port stays.
+ */
+internal fun shownServer(server: String): String {
+    val t = server.trim().trimEnd('/')
+    val (rest, port) = when {
+        t.startsWith("https://", ignoreCase = true) -> t.substring(8) to ":443"
+        t.startsWith("http://", ignoreCase = true) -> t.substring(7) to ":80"
+        else -> t to ""
+    }
+    val host = rest.substringBefore('/')
+    val shownHost = if (port.isNotEmpty() && host.endsWith(port)) host.removeSuffix(port) else host
+    return shownHost + rest.substring(host.length)
+}
+
+/** True unless [server] is plain http to a host this build's network config keeps it from. */
+private fun cleartextAllowed(server: String): Boolean {
+    if (!server.trim().startsWith("http://", ignoreCase = true)) return true
+    val host = server.trim().substring(7).substringBefore('/').substringBefore('?').let {
+        if (it.startsWith("[")) it.substringBefore(']').removePrefix("[") else it.substringBeforeLast(':')
+    }
+    return android.security.NetworkSecurityPolicy.getInstance().isCleartextTrafficPermitted(host)
+}
 
 /** A line or two of explanation between the rows. */
 @Composable

@@ -124,15 +124,27 @@ class Cloud private constructor(context: Context) {
     @Synchronized
     private fun followHomeNow(): HomeAccount.Step {
         val who = _homeWho.value ?: return HomeAccount.Step.Keep
-        val step = HomeAccount.follow(who, prefs.getString(HOME_STAMP, null).orEmpty(), HomeAccount.ask(appContext))
+        val answer = HomeAccount.ask(appContext)
+        val step = HomeAccount.follow(who, prefs.getString(HOME_STAMP, null).orEmpty(), answer)
+        fun mirror(held: HomeAccount.Held) {
+            val a = Account(held.server, held.user, held.password, held.uid)
+            val sealed = Secrets.seal(a.toJson().toString())
+            prefs.edit().apply { if (sealed != null) putString(ACCOUNT, sealed) else remove(ACCOUNT) }
+                .putString(HOME_STAMP, held.stamp).apply()
+            _account.value = a
+        }
         when (step) {
-            is HomeAccount.Step.Keep -> Unit
+            is HomeAccount.Step.Keep -> {
+                // The same password, but the user id Home has only now found (a copy taken from
+                // a Home that did not have it yet, or from this app before it read it): the
+                // paths follow it, the folder and what was synced stay.
+                val current = _account.value
+                if (answer is HomeAccount.Answer.Has && current != null && current.uid != answer.held.uid &&
+                    current.password == answer.held.password && HomeAccount.who(current.server, current.user) == answer.held.who
+                ) mirror(answer.held)
+            }
             is HomeAccount.Step.Take -> {
-                val a = Account(step.held.server, step.held.user, step.held.password)
-                val sealed = Secrets.seal(a.toJson().toString())
-                prefs.edit().apply { if (sealed != null) putString(ACCOUNT, sealed) else remove(ACCOUNT) }
-                    .putString(HOME_STAMP, step.held.stamp).apply()
-                _account.value = a
+                mirror(step.held)
                 _state.value = State.IDLE
             }
             is HomeAccount.Step.Drop -> {
@@ -218,7 +230,7 @@ class Cloud private constructor(context: Context) {
      * Keeps [a] after making sure it opens the files on the server, and starts the first sync.
      * Throws [Refused] or [Unreachable] when the account will not do.
      */
-    suspend fun signIn(a: Account) = keep(a, null)
+    suspend fun signIn(a: Account) = keep(withContext(Dispatchers.IO) { a.copy(uid = userId(a)) }, null)
 
     /**
      * The phone's Nextcloud account, the one Home holds, taken at the reader's press in place of
@@ -230,7 +242,7 @@ class Cloud private constructor(context: Context) {
     suspend fun useHome(held: HomeAccount.Held) {
         stopBrowser()
         scope.async {
-            keep(Account(held.server, held.user, held.password), held)
+            keep(Account(held.server, held.user, held.password, held.uid), held)
         }.await()
     }
 

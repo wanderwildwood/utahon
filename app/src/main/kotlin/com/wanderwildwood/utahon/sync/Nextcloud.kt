@@ -10,13 +10,46 @@ import java.util.concurrent.TimeUnit
 /**
  * A Nextcloud account as its login page hands it over: the server, the user's login name and an
  * app password made for this phone alone, which can be revoked from the server's security
- * settings without touching the real one.
+ * settings without touching the real one. The login name ([user]) signs in; the user id ([uid])
+ * is what the file paths use (`remote.php/dav/files/<uid>/`). They differ where people sign in
+ * with an email address or another case; the same otherwise.
  */
-data class Account(val server: String, val user: String, val password: String) {
+data class Account(val server: String, val user: String, val password: String, val uid: String = user) {
     fun toJson(): JSONObject = JSONObject().put("server", server).put("user", user).put("password", password)
+        .apply { if (uid != user) put("uid", uid) }
 
     companion object {
-        fun fromJson(o: JSONObject) = Account(o.getString("server"), o.getString("user"), o.getString("password"))
+        fun fromJson(o: JSONObject): Account {
+            val user = o.getString("user")
+            return Account(o.getString("server"), user, o.getString("password"), o.optString("uid").ifBlank { user })
+        }
+    }
+}
+
+/**
+ * The user id of [a] on its server, asked once at sign-in: `ocs/v2.php/cloud/user`, `ocs.data.id`.
+ * [Refused] when the server will not let the account in; the login name when the server gives
+ * no id (an older or a stripped-down server), as the two are the same for most people.
+ */
+fun userId(a: Account, client: OkHttpClient = http): String {
+    val request = Request.Builder()
+        .url(a.server.trimEnd('/') + "/ocs/v2.php/cloud/user?format=json")
+        .header("Authorization", okhttp3.Credentials.basic(a.user, a.password, Charsets.UTF_8))
+        .header("OCS-APIRequest", "true")
+        .header("Accept", "application/json")
+        .header("User-Agent", AGENT)
+        .build()
+    return try {
+        client.newCall(request).execute().use { response ->
+            if (response.code == 401) throw Refused("401")
+            if (!response.isSuccessful) return a.user
+            runCatching {
+                JSONObject(response.body!!.string()).getJSONObject("ocs").getJSONObject("data").getString("id")
+            }.getOrNull()?.trim()?.takeIf { it.isNotEmpty() } ?: a.user
+        }
+    } catch (e: IOException) {
+        if (e is Refused) throw e
+        throw Unreachable(e.message ?: "no answer")
     }
 }
 
