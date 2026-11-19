@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -217,50 +218,56 @@ class Cloud private constructor(context: Context) {
      * Keeps [a] after making sure it opens the files on the server, and starts the first sync.
      * Throws [Refused] or [Unreachable] when the account will not do.
      */
-    suspend fun signIn(a: Account) {
-        withContext(Dispatchers.IO) { NextcloudFolder(a, DEFAULT_FOLDER).probe() }
-        lock.withLock {
-            // Only the sealed form is ever written; with no keystore the account lasts this run only.
-            val sealed = Secrets.seal(a.toJson().toString())
-            prefs.edit().apply { if (sealed != null) putString(ACCOUNT, sealed) else remove(ACCOUNT) }
-                .putString(FOLDER, DEFAULT_FOLDER).remove(LAST).remove(LISTS_ETAG).remove(LISTS_STAMP)
-                .remove(HOME_WHO).remove(HOME_STAMP).apply()
-            linksFile.delete()
-            _folder.value = DEFAULT_FOLDER
-            _last.value = 0L
-            _homeWho.value = null
-            _account.value = a
-            _state.value = State.IDLE
-        }
-        syncNow()
-    }
+    suspend fun signIn(a: Account) = keep(a, null)
 
     /**
      * The phone's Nextcloud account, the one Home holds, taken at the reader's press in place of
      * the app's own sign-in, after making sure it opens the files on the server. Followed from
      * now on ([followHome]). The same account as the one signed in to here keeps its folder and
-     * what was synced. Throws [Refused] or [Unreachable] when the account will not do.
+     * what was synced. Runs on the app's own scope, so Back on the screen does not stop it
+     * halfway. Throws [Refused] or [Unreachable] when the account will not do.
      */
     suspend fun useHome(held: HomeAccount.Held) {
         stopBrowser()
-        val a = Account(held.server, held.user, held.password)
-        val current = _account.value
-        if (current == null || HomeAccount.who(current.server, current.user) != held.who) {
-            signIn(a)
-        } else {
-            withContext(Dispatchers.IO) { NextcloudFolder(a, _folder.value).probe() }
-            lock.withLock {
-                val sealed = Secrets.seal(a.toJson().toString())
-                prefs.edit().apply { if (sealed != null) putString(ACCOUNT, sealed) else remove(ACCOUNT) }.apply()
-                _account.value = a
-                _state.value = State.IDLE
-            }
-            syncNow()
+        scope.async {
+            keep(Account(held.server, held.user, held.password), held)
+        }.await()
+    }
+
+    /**
+     * [a] kept, and with it, in the same step, whether it is Home's ([held]) or the app's own
+     * (null), so the password is never kept without saying whose it is. A new account starts
+     * with the default folder and nothing synced; Home's account, when it is the one already
+     * signed in to here, keeps its folder and what was synced. Then a sync.
+     */
+    private suspend fun keep(a: Account, held: HomeAccount.Held?) {
+        fun sameAsHere(): Boolean {
+            val current = _account.value ?: return false
+            return held != null && HomeAccount.who(current.server, current.user) == held.who
         }
+        withContext(Dispatchers.IO) { NextcloudFolder(a, if (sameAsHere()) _folder.value else DEFAULT_FOLDER).probe() }
         lock.withLock {
-            prefs.edit().putString(HOME_WHO, held.who).putString(HOME_STAMP, held.stamp).apply()
-            _homeWho.value = held.who
+            val same = sameAsHere()
+            // Only the sealed form is ever written; with no keystore the account lasts this run only.
+            val sealed = Secrets.seal(a.toJson().toString())
+            prefs.edit().apply {
+                if (sealed != null) putString(ACCOUNT, sealed) else remove(ACCOUNT)
+                if (!same) {
+                    putString(FOLDER, DEFAULT_FOLDER).remove(LAST).remove(LISTS_ETAG).remove(LISTS_STAMP)
+                }
+                if (held != null) putString(HOME_WHO, held.who).putString(HOME_STAMP, held.stamp)
+                else remove(HOME_WHO).remove(HOME_STAMP)
+            }.apply()
+            if (!same) {
+                linksFile.delete()
+                _folder.value = DEFAULT_FOLDER
+                _last.value = 0L
+            }
+            _homeWho.value = held?.who
+            _account.value = a
+            _state.value = State.IDLE
         }
+        syncNow()
     }
 
     /** A wait for the browser's sign-in given up, as another way in was taken. */
