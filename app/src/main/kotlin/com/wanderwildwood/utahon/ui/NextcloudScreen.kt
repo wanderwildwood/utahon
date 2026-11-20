@@ -158,8 +158,9 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                     problem?.let { p -> item(key = "problem") { Note(stringResource(p)) } }
                 }
                 item(key = "out") {
+                    // Home's account: one press, as in the other apps; nothing on the phone goes.
                     if (homeWho != null) {
-                        ArmedRow(stringResource(R.string.home_account_stop), stringResource(R.string.home_account_stop_armed)) { cloud.signOut() }
+                        SettingRow(stringResource(R.string.home_account_stop), null) { cloud.signOut() }
                     } else {
                         ArmedRow(stringResource(R.string.cloud_sign_out), stringResource(R.string.cloud_sign_out_armed)) { cloud.signOut() }
                     }
@@ -170,7 +171,7 @@ fun NextcloudScreen(cloud: Cloud, onBack: () -> Unit) {
                     Note(stringResource(R.string.home_account_signed_out, stringResource(R.string.home_account_kept)))
                 }
                 item(key = "out") {
-                    ArmedRow(stringResource(R.string.home_account_stop), stringResource(R.string.home_account_stop_armed)) { cloud.signOut() }
+                    SettingRow(stringResource(R.string.home_account_stop), null) { cloud.signOut() }
                 }
             } else {
                 item(key = "explain") { Note(stringResource(R.string.cloud_explain)) }

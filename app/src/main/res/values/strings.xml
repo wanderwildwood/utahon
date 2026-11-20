@@ -243,7 +243,6 @@
     <!-- "ada on cloud.example.org, from Home." The server without https:// -->
     <string name="home_account_in_use">%1$s on %2$s, from Home.</string>
     <string name="home_account_stop">Stop using it</string>
-    <string name="home_account_stop_armed">Stop using it — tap again</string>
     <!-- %1$s is home_account_kept -->
     <string name="home_account_signed_out">Home is signed out of Nextcloud, so this app is too. Your %1$s stay on the phone.</string>
     <string name="home_account_kept">songs and setlists</string>
